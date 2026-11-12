@@ -60,9 +60,20 @@ El MCP server expone tools que llaman a los servicios (buscar tutores, ver dispo
 - Mientras un servicio de un compañero no esté listo, usar mocks del cliente gRPC.
 - Es el punto que define los contratos del sistema: cualquier cambio de contrato se coordina con el equipo.
 
+### Estado actual
+
+- Stack: Node 24, NestJS 12 (ESM), TypeScript 6, Apollo Server 5, oxlint, Jest 30.
+- GraphQL **code-first**: el esquema se genera desde los modelos y se versiona en `schema.gql` (no editarlo a mano).
+- Patrón puerto/adaptador por servicio: `src/sesiones/` tiene el puerto (`SESIONES_PORT` / `SesionesPort`), un adaptador mock en memoria (`SesionesMock`), modelos GraphQL y resolver. El adaptador se elige solo en `sesiones.module.ts`; ahí entrará el adaptador gRPC.
+- Usuario actual: decorador `@UsuarioId()` que lee la cabecera `x-usuario-id` (temporal, sin autenticación, hasta que exista el login de Usuarios).
+- Aún no hay cliente gRPC real, ni módulos de Usuarios, Material (Kafka) ni Agente (REST).
+
 ## Contratos
 
-- Los `.proto` viven en un repo aparte (`contracts`) que cada servicio incluye como submódulo o copia en el build.
+- Los `.proto` vivirán en un repo aparte (`contracts`) que cada servicio incluya como submódulo o copie en el build.
+- Mientras ese repo no exista, `proto/sesiones.proto` vive en este repo y se copia idéntico en el servicio de Sesiones (`src/main/protobuf/sesiones.proto`). Si cambia uno, cambiar el otro.
+- `sesiones.proto` (paquete `tutorias.sesiones.v1`): `CrearSesion`, `ObtenerSesion`, `ListarSesiones`, `ConfirmarSesion`, `CancelarSesion`, `FinalizarSesion`, `ObtenerDisponibilidad` (BFF) y `VerificarParticipacion` (Material). Los errores viajan como códigos de estado gRPC (`NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`).
+- Falta: `.proto` de Usuarios y tópicos/payloads de Kafka documentados.
 - Formato de mensajes Kafka: JSON con `eventId`, `type`, `occurredAt` y `payload`.
 
 ## Convenciones
@@ -90,8 +101,8 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 ## Próximos pasos
 
-1. Escribir los contratos: `.proto` de Usuarios y Sesiones, tópicos de Kafka y esquema GraphQL inicial. Revisarlos con el equipo.
-2. Servicio de Sesiones funcional: Spring Boot, Flyway, JPA, servidor gRPC y productor Kafka, probado a mano.
-3. BFF funcional: resolvers GraphQL que llaman a Sesiones por gRPC.
+1. Contratos: ✅ `sesiones.proto` y esquema GraphQL de sesiones. Pendiente: `.proto` de Usuarios y tópicos de Kafka, revisados con el equipo.
+2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka. Pendiente: cliente gRPC a Usuarios (validar tutor y ramo aprobado) y probar a mano de punta a punta.
+3. BFF funcional: ✅ resolvers GraphQL contra el mock. Pendiente: adaptador gRPC real hacia Sesiones.
 4. Tests de ambos hasta coverage ≥ 60%.
 5. Dockerfile y pipeline de cada repo.
