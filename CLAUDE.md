@@ -64,9 +64,20 @@ El MCP server expone tools que llaman a los servicios (buscar tutores, ver dispo
 
 - Stack: Node 24, NestJS 12 (ESM), TypeScript 6, Apollo Server 5, oxlint, Jest 30.
 - GraphQL **code-first**: el esquema se genera desde los modelos y se versiona en `schema.gql` (no editarlo a mano).
-- Patrón puerto/adaptador por servicio: `src/sesiones/` tiene el puerto (`SESIONES_PORT` / `SesionesPort`), un adaptador mock en memoria (`SesionesMock`), modelos GraphQL y resolver. El adaptador se elige solo en `sesiones.module.ts`; ahí entrará el adaptador gRPC.
+- Patrón puerto/adaptador por servicio: `src/sesiones/` tiene el puerto (`SESIONES_PORT` / `SesionesPort`), dos adaptadores (`SesionesGrpc`, real, con `@grpc/grpc-js` + `@grpc/proto-loader`; `SesionesMock`, en memoria), modelos GraphQL y resolver. El adaptador se elige solo en `sesiones.module.ts`: gRPC si existe la variable `SESIONES_GRPC_URL` (ej. `localhost:9090`), si no el mock.
 - Usuario actual: decorador `@UsuarioId()` que lee la cabecera `x-usuario-id` (temporal, sin autenticación, hasta que exista el login de Usuarios).
-- Aún no hay cliente gRPC real, ni módulos de Usuarios, Material (Kafka) ni Agente (REST).
+- Aún no hay módulos de Usuarios, Material (Kafka) ni Agente (REST).
+
+### Aviso para el frontend (leer antes de manejar errores)
+
+Cuando un compañero empiece el frontend, recordarle esto:
+
+- Los errores de GraphQL **todavía no tienen un `extensions.code` confiable**: los 404 y 409 salen como `INTERNAL_SERVER_ERROR`. Solo 400 (`BAD_REQUEST`) y 403 (`FORBIDDEN`) salen bien.
+- Para distinguir errores, usar **`extensions.status`** (404 no existe, 409 choque de horario o transición de estado inválida, 403 no participa, 400 datos inválidos, 503 servicio caído). Ese campo ya es correcto y se va a mantener.
+- No escribir lógica que dependa de `code === 'INTERNAL_SERVER_ERROR'`: se va a corregir.
+- Pendiente en el BFF: agregar `formatError` en `app.module.ts` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc., y avisar al frontend cuando esté.
+- El `stacktrace` que aparece en las respuestas es solo de desarrollo; en Kubernetes se oculta con `NODE_ENV=production`.
+- Las mutations de sesiones (`crearSesion`, `confirmarSesion`, `cancelarSesion`, `finalizarSesion`) requieren la cabecera `x-usuario-id` (temporal, hasta que exista el login); sin ella responden 401.
 
 ## Contratos
 
@@ -103,6 +114,6 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 1. Contratos: ✅ `sesiones.proto` y esquema GraphQL de sesiones. Pendiente: `.proto` de Usuarios y tópicos de Kafka, revisados con el equipo.
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka. Pendiente: cliente gRPC a Usuarios (validar tutor y ramo aprobado) y probar a mano de punta a punta.
-3. BFF funcional: ✅ resolvers GraphQL contra el mock. Pendiente: adaptador gRPC real hacia Sesiones.
+3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones (probado contra un servidor gRPC falso). Pendiente: probarlo de punta a punta contra Sesiones real.
 4. Tests de ambos hasta coverage ≥ 60%.
 5. Dockerfile y pipeline de cada repo.
