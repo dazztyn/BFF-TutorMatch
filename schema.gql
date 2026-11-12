@@ -1,0 +1,62 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type BloqueDisponibilidad {
+  """Día de la semana ISO: 1 = lunes ... 7 = domingo"""
+  dia: Int!
+
+  """
+  Hora local en formato "HH:mm"
+  """
+  horaFin: String!
+
+  """
+  Hora local en formato "HH:mm"
+  """
+  horaIni: String!
+  tutorId: ID!
+}
+
+input CrearSesionInput {
+  fin: DateTime!
+  inicio: DateTime!
+  ramoCodigo: String!
+  tutorId: ID!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+enum EstadoSesion {
+  CANCELADA
+  CONFIRMADA
+  FINALIZADA
+  PENDIENTE
+}
+
+type Mutation {
+  cancelarSesion(id: ID!): Sesion!
+  confirmarSesion(id: ID!): Sesion!
+  crearSesion(input: CrearSesionInput!): Sesion!
+  finalizarSesion(id: ID!): Sesion!
+}
+
+type Query {
+  disponibilidad(tutorId: ID!): [BloqueDisponibilidad!]!
+  sesion(id: ID!): Sesion
+  sesiones(estudianteId: ID, tutorId: ID): [Sesion!]!
+}
+
+type Sesion {
+  creadaEn: DateTime!
+  estado: EstadoSesion!
+  estudianteId: ID!
+  fin: DateTime!
+  id: ID!
+  inicio: DateTime!
+  ramoCodigo: String!
+  tutorId: ID!
+}
