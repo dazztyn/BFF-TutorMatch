@@ -17,8 +17,8 @@ import type {
 } from './sesiones.models';
 import type { SesionesPort } from './sesiones.port';
 
-// Se resuelve desde la raíz del proyecto: en Docker hay que copiar proto/ junto a dist/.
-const PROTO = join(process.cwd(), 'proto', 'sesiones.proto');
+// Se resuelve desde la raíz del proyecto: en Docker ahora hay que copiar contracts/proto/, no proto/
+const PROTO = join(process.cwd(), 'contracts', 'proto', 'sesiones', 'v1', 'sesiones.proto');
 const PLAZO_MS = 5000;
 
 // google.protobuf.Timestamp tal como lo entrega proto-loader (longs: String).
