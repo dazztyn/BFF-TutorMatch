@@ -2,7 +2,13 @@
 
 ## Este repositorio
 
-Este repo es el **BFF (NestJS + GraphQL)**. Aquí solo va código del BFF; el resto de la arquitectura es contexto.
+Este repo es el **BFF (NestJS + GraphQL)**: `dazztyn/BFF-TutorMatch`. Aquí solo va código del BFF; el resto de la arquitectura es contexto.
+
+Repos relacionados (todos en GitHub, cuenta `dazztyn`):
+
+- `BFF-TutorMatch`: este repo.
+- `Sesiones-TutorMatch`: servicio de Sesiones (Spring Boot), también a cargo de Vicente.
+- `Contratos-TutorMatch`: contratos compartidos, incluido como submódulo en `contracts/`.
 
 - Tests: `npm run test:cov` (coverage ≥ 60%)
 - Levantar en local: `npm run start:dev`
@@ -39,10 +45,11 @@ Proyecto 2 del curso de Arquitectura de Sistemas. Plataforma donde estudiantes r
 - BFF → Sesiones: gRPC.
 - BFF → Material: gRPC (antes decía Kafka; el contrato `material.proto` lo cambió). El BFF ya no usa Kafka.
 - BFF → MCP server: REST (`POST /agent/chat`).
-- Sesiones → Usuarios: gRPC (`VerificarTutorRamo`: validar que el tutor existe y aprobó el ramo).
-- Sesiones → Material: Kafka (`sesion.creada`, `sesion.finalizada`, `sesion.cancelada`).
+- Sesiones → Usuarios: gRPC (`ValidarTutorRamo`: validar que el tutor tiene ese ramo activo).
+- Sesiones → Material: Kafka (`sesion.creada`, `sesion.finalizada`, `sesion.cancelada`). Material arma con ellos su copia de las sesiones para decidir quién ve qué material.
 - Material → Sesiones: gRPC (`VerificarParticipacion`, antes de aceptar una evaluación).
-- Material → Usuarios: gRPC (`VerificarTutorRamo`, antes de aceptar material).
+- Material → Usuarios: gRPC (`ValidarTutorRamo`, antes de aceptar material).
+- Los archivos (PDF e imágenes) solo viajan entre el BFF y Material, por gRPC. Nunca por Kafka.
 - Agente → Usuarios, Sesiones y Material: gRPC directo con los mismos `.proto` (sus tools no pasan por el BFF).
 
 ### Agente (MCP)
@@ -53,9 +60,9 @@ El MCP server expone tools que llaman a los servicios (buscar tutores, ver dispo
 
 Flujo del front definido hasta ahora: inicio de sesión con ingreso y registro de alumnos y de tutores; para el tutor, registro con sus ramos, pantalla principal con su semana y pantalla de archivos por ramo. El flujo del alumno todavía no está definido (buscar tutor, ver su semana, reservar, ver y cancelar sus sesiones, evaluar, ver material).
 
-- **Un usuario puede ser alumno y tutor a la vez** (como en las ayudantías). Es tutor de un ramo cuando lo declaró aprobado, tal como dice `usuarios.proto`.
-  - "Ingreso de alumnos" e "Ingreso de tutores" son el mismo login; el front solo elige qué pantalla abrir. El registro de tutor es el registro normal más sus ramos.
-  - El JWT no lleva rol. El permiso se revisa en cada acción: para marcar disponibilidad o crear una sesión en un ramo, Sesiones llama a `Usuarios.VerificarTutorRamo`.
+- **Un usuario puede ser alumno y tutor a la vez** (como en las ayudantías). Es tutor de un ramo cuando se inscribió en él y no lo ha quitado. El detalle está en `propuestas/usuarios.md` del repo de contratos (ver "Decisiones de Usuarios").
+  - "Ingreso de alumnos" e "Ingreso de tutores" son el mismo login con dos portales; el front elige la pantalla según `es_tutor`. El registro de tutor es el registro normal más el formulario de inscripción de ramos.
+  - El JWT no lleva rol. El permiso se revisa en cada acción: para marcar disponibilidad o crear una sesión en un ramo, Sesiones llama a `Usuarios.ValidarTutorRamo`.
   - Nadie puede reservarse a sí mismo, y un usuario no puede tener dos sesiones que se crucen, aunque en una sea alumno y en la otra tutor.
 - **Disponibilidad semana a semana, por ramo:** el tutor marca casillas con fecha concreta para cada ramo que imparte. Una casilla marcada para un ramo deja de estar disponible para los otros (la base lo impide con un `EXCLUDE` sobre `tutor_id` y el rango, como en `sesiones`). Falta definir la duración de una casilla.
 - **Reservar:** el alumno solo puede tomar una casilla disponible de ese tutor y ese ramo; `CrearSesion` lo valida.
@@ -67,6 +74,28 @@ Flujo del front definido hasta ahora: inicio de sesión con ingreso y registro d
   - Una sesión `PENDIENTE` cuyo `inicio` ya pasó sin confirmación pasa a `CANCELADA` y publica `sesion.cancelada`.
   - Así el alumno siempre puede evaluar: Material solo acepta una evaluación (nota 1 a 5 y comentario) si `VerificarParticipacion` dice que la sesión está `FINALIZADA` y que el alumno participó.
 - **Zona horaria:** todo en UTC (base de datos y contratos). La disponibilidad deja de usar "HH:mm". El front calcula la semana en hora de Chile y pide al BFF ese rango convertido a UTC.
+
+### Decisiones de Usuarios (acordadas el 2026-11-15)
+
+Detalle completo, esquema de PostgreSQL y `usuarios.proto` propuesto en `propuestas/usuarios.md` del repo de contratos. Lo que importa para el BFF:
+
+- **Un solo `Login` y dos portales.** `Login` y `RegistroUsuario` devuelven el token y el usuario, con `es_tutor`. Por el portal de alumnos se entra siempre; por el de tutores, si `es_tutor` es falso, el front invita a inscribirse.
+- **`es_tutor` es solo de lectura y solo decide la pantalla.** Usuarios lo guarda y lo recalcula (verdadero si tiene al menos un ramo activo). Los permisos de tutor los validan Sesiones y Material con `ValidarTutorRamo`.
+- **Inscribirse como tutor es un formulario de verificación simulado:** por cada ramo, nota de aprobación (4.0 a 7.0) y periodo (ej. `2025-2`). Se aprueba en el acto si los datos son válidos (`AgregarRamosTutor`).
+- **Un tutor puede quitar un ramo y reactivarlo** sin repetir el formulario (`QuitarRamoTutor`, `ReactivarRamoTutor`). Quitar un ramo no cancela sus sesiones ya reservadas; solo impide reservas nuevas.
+- **RPC propuestos:** `RegistroUsuario`, `Login`, `ObtenerUsuario`, `ObtenerUsuarios` (en lote), `AgregarRamosTutor`, `QuitarRamoTutor`, `ReactivarRamoTutor`, `ListarRamos`, `ListarTutoresPorRamo`, `ValidarTutorRamo`. Usan los nombres de Pablo y reemplazan a los del borrador.
+
+### Decisiones de Material (acordadas el 2026-11-15)
+
+Detalle completo, modelo de MongoDB y `material.proto` propuesto en `propuestas/material.md` del repo de contratos. Lo que importa para el BFF:
+
+- **Quién ve el material:** el tutor ve el suyo; un alumno ve el de un tutor en un ramo si tiene o tuvo una sesión no cancelada con ese tutor en ese ramo. Lo decide Material; el BFF no filtra.
+- **Dos tipos de material:** `ARCHIVO` (PDF, PNG o JPEG, hasta 10 MB) y `AVISO` (solo texto). Solo el dueño puede eliminar.
+- **Archivos por HTTP en el BFF, por gRPC hacia Material:** `POST /archivos` (multipart) para subir y `GET /archivos/:id` para descargar; el BFF valida el JWT, el tamaño y el tipo, y reenvía los bytes por gRPC. El cliente gRPC de Material en el BFF sube su límite de mensaje a 11 MB (por defecto es 4 MB). Los avisos, listar y eliminar van por GraphQL.
+- **Evaluaciones anónimas:** nota de 1 a 5 y comentario opcional, una por sesión, sin editar ni borrar. Material nunca devuelve quién la escribió ni de qué sesión es, salvo al propio alumno (`ListarMisEvaluaciones`).
+- **Evaluaciones públicas:** cualquier usuario con sesión iniciada ve el promedio, la cantidad y los comentarios de un tutor. El buscador muestra el promedio con `ObtenerResumenTutores`, en lote.
+- **Sin quizzes por ahora:** el agente todavía no está definido.
+- **RPC propuestos:** `SubirMaterial`, `ListarMaterial`, `DescargarArchivo`, `EliminarMaterial`, `Evaluar`, `ListarEvaluaciones`, `ListarMisEvaluaciones`, `ObtenerResumenTutores`.
 
 ## Servicio de Sesiones (Spring Boot)
 
@@ -103,19 +132,19 @@ Cuando un compañero empiece el frontend, recordarle esto:
 
 ## Contratos
 
-Viven en el repo `tutormatch-contracts` (GitHub `dazztyn/tutormatch-contracts`), incluido como submódulo en `contracts/` en el BFF y en Sesiones. Su `README.md` tiene las convenciones y las reglas para cambiar un contrato; leerlo antes de tocar uno. Un cambio de contrato se hace por PR en ese repo, no en las copias de cada servicio.
+Viven en el repo `Contratos-TutorMatch` (GitHub `dazztyn/Contratos-TutorMatch`), incluido como submódulo en `contracts/` en el BFF y en Sesiones. Su `README.md` tiene las convenciones y las reglas para cambiar un contrato; leerlo antes de tocar uno. Un cambio de contrato se hace por PR en ese repo, no en las copias de cada servicio.
 
 | Archivo | Estado | Qué significa para el BFF |
 |---|---|---|
 | `proto/sesiones/v1/sesiones.proto` | Estable, implementado | Igual que antes; ya lo usa `SesionesGrpc`. |
-| `proto/usuarios/v1/usuarios.proto` | BORRADOR | Registro, login (JWT), datos de usuario, ramos y búsqueda de tutores. |
-| `proto/material/v1/material.proto` | BORRADOR | Material y evaluaciones, por gRPC (ya no por Kafka). |
+| `proto/usuarios/v1/usuarios.proto` | BORRADOR, reemplazado por `propuestas/usuarios.md` | Registro, login (JWT), datos de usuario, ramos y búsqueda de tutores. |
+| `proto/material/v1/material.proto` | BORRADOR, reemplazado por `propuestas/material.md` | Material, archivos, avisos y evaluaciones, por gRPC. |
 | `rest/agente.md` | BORRADOR | `POST /agent/chat` con `usuarioId`, `conversacionId` y `mensaje`. |
 | `eventos/sesion.*.json` | Estable | Formato Kafka que publica Sesiones; el BFF no lo usa. |
 
 Decisiones de los contratos que afectan al BFF:
 
-- **Autenticación:** `Usuarios.IniciarSesion` devuelve un JWT HS256 con el id del usuario en `sub`. El BFF lo verifica con el mismo secreto (variable `JWT_SECRET`, un Secret de Kubernetes) y saca de ahí el usuario actual. Reemplaza a `x-usuario-id`.
+- **Autenticación:** `Usuarios.Login` devuelve un JWT HS256 con el id del usuario en `sub` y el vencimiento en `exp` (24 horas). El BFF lo verifica con el mismo secreto (variable `JWT_SECRET`, un Secret de Kubernetes) y saca de ahí el usuario actual. Reemplaza a `x-usuario-id`.
 - **Ids:** usuarios y sesiones usan UUID en texto. Los códigos de ramo salen del catálogo `Usuarios.ListarRamos` (ej. `MAT1610`).
 - **Nombres en las sesiones:** para mostrar tutor y estudiante de muchas sesiones, usar `Usuarios.ObtenerUsuarios` en lote (una llamada por consulta GraphQL, no una por sesión). Los ids inexistentes se omiten sin error.
 - **Material visible:** `ListarMaterial` exige `usuario_id` y devuelve solo lo que ese usuario puede ver; el BFF no filtra por su cuenta.
@@ -125,11 +154,11 @@ Decisiones de los contratos que afectan al BFF:
 
 Pendientes del lado de los contratos:
 
-- Revisar en equipo los tres borradores (Usuarios, Material, Agente) antes de implementar sus módulos en el BFF.
+- Las propuestas de Usuarios y Material están en `propuestas/` del repo de contratos (rama `propuestas/usuarios-material`, PR por abrir). Una vez aprobadas, su `.proto` reemplaza al de `proto/` en otro PR, y el BFF y Sesiones actualizan el submódulo.
+- Agregar `tutor_id` y `ramo_codigo` a `VerificarParticipacionResponse` en `sesiones.proto` (campos nuevos, cambio seguro), para que Material guarde la evaluación con una sola llamada. Lo implementa Sesiones.
+- El contrato del agente sigue en borrador; Pablo todavía no lo define.
 - Cambiar `sesiones.proto` para las decisiones del flujo: `BloqueDisponibilidad` con `ramo_codigo`, `inicio` y `fin` (Timestamp) en vez de `dia`, `hora_ini` y `hora_fin`; RPC para marcar y desmarcar casillas; `ObtenerDisponibilidad` por rango de fechas; `ListarSesiones` con filtros de estado y rango de fechas. Cambiar tipos exige `v2` según el README de contratos, pero el único otro consumidor de esos campos es el agente (borrador): proponer cambiar `v1` con el visto bueno del equipo antes de que alguien lo implemente.
-- Coordinar con Pablo (Usuarios): que el registro acepte los ramos en la misma llamada y los datos personales que pida el formulario (hoy `Usuario` solo tiene nombre y email).
-- Coordinar con Ien (Material): la pantalla de archivos pide subir y eliminar archivos, pero `material.proto` guarda texto (`contenido`) y no tiene RPC para eliminar. Definir dónde se guardan los binarios (GridFS, MinIO...) y cómo obtiene el agente el texto para el quiz. gRPC limita los mensajes a 4 MB por defecto.
-- `.gitmodules` apunta a `dazztyn/Contratos-TutorMatch`, que hoy redirige al mismo repo; cambiarlo a `dazztyn/tutormatch-contracts` para no depender de la redirección.
+- Coordinar con Pablo (Usuarios): los datos personales que pida el formulario de registro (hoy `Usuario` solo tiene nombre y email) y quién carga el catálogo de ramos.
 
 ## Convenciones
 
@@ -156,20 +185,24 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 ## Próximos pasos
 
-1. Contratos: ✅ repo `tutormatch-contracts` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. Pendiente: revisar en equipo los borradores de Usuarios, Material y Agente; proponer el cambio de `sesiones.proto` para la disponibilidad semanal; definir el flujo del alumno y la duración de una casilla.
+1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). Pendiente: PR de las propuestas y luego el de los `.proto`; proponer el cambio de `sesiones.proto` para la disponibilidad semanal y los campos nuevos de `VerificarParticipacion`; definir el flujo del alumno, la duración de una casilla y el contrato del agente.
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12): los RPC responden según el contrato y los eventos `sesion.creada`, `sesion.finalizada` y `sesion.cancelada` llegan a Kafka. Pendiente (ver "Decisiones del flujo"):
-   1. Cliente gRPC a `Usuarios.VerificarTutorRamo`, con un mock mientras Usuarios no esté, usado al crear una sesión y al marcar disponibilidad (`FAILED_PRECONDITION` si no es tutor de ese ramo).
+   1. Cliente gRPC a `Usuarios.ValidarTutorRamo`, con un mock mientras Usuarios no esté, usado al crear una sesión y al marcar disponibilidad (`FAILED_PRECONDITION` si no tiene ese ramo activo).
    2. Migración V3: disponibilidad con fecha concreta, ramo y `EXCLUDE` contra solapes del mismo tutor.
    3. RPC nuevos de disponibilidad y filtros de `ListarSesiones`, una vez acordado el cambio de contrato.
    4. Validaciones al crear: casilla disponible de ese tutor y ramo, no reservarse a sí mismo, sin cruce con otras sesiones del usuario como alumno o tutor.
    5. Desmarcar falla si hay una sesión pendiente o confirmada en ese horario.
    6. Tarea programada: finalizar las confirmadas vencidas y cancelar las pendientes no confirmadas a tiempo, publicando sus eventos.
+   7. `VerificarParticipacion` devuelve también `tutor_id` y `ramo_codigo`, una vez aprobado en el contrato.
 3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden:
    1. `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
-   2. Módulo `usuarios/` (puerto + mock + gRPC): `registrar` (con ramos opcionales, para el registro de tutor), `iniciarSesion`, `usuario`, `ramos`, `buscarTutores`, `actualizarRamos`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`.
-   3. Autenticación con el JWT de Usuarios (`JWT_SECRET`), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio.
+   2. Módulo `usuarios/` (puerto + mock + gRPC), según `propuestas/usuarios.md`: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`.
+   3. Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio.
    4. Sesiones según las decisiones del flujo: filtro por estado y rango de fechas en `sesiones`, una query para la semana del tutor (disponibilidad + reservas en un rango), mutaciones para marcar y desmarcar casillas.
-   5. Módulo `material/` (puerto + mock + gRPC): `subirMaterial`, `material`, `evaluar`, `evaluaciones`. La subida de archivos va por un endpoint REST del BFF (`POST /archivos`), no por GraphQL, cuando Material defina cómo guarda los binarios.
-   6. Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`).
+   5. Módulo `material/` (puerto + mock + gRPC), según `propuestas/material.md`:
+      - GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y el promedio y la cantidad de evaluaciones en los tutores del buscador, resueltos en lote con `ObtenerResumenTutores`.
+      - REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`.
+      - Cliente gRPC con límite de mensaje de 11 MB.
+   6. Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), cuando Pablo defina su contrato.
 4. Tests de ambos hasta coverage ≥ 60%.
 5. Dockerfile y pipeline de cada repo (checkout con `submodules: true` y `contracts/proto/` copiado en la imagen).
