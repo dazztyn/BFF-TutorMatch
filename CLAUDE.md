@@ -64,7 +64,8 @@ Flujo del front definido hasta ahora: inicio de sesión con ingreso y registro d
   - "Ingreso de alumnos" e "Ingreso de tutores" son el mismo login con dos portales; el front elige la pantalla según `es_tutor`. El registro de tutor es el registro normal más el formulario de inscripción de ramos.
   - El JWT no lleva rol. El permiso se revisa en cada acción: para marcar disponibilidad o crear una sesión en un ramo, Sesiones llama a `Usuarios.ValidarTutorRamo`.
   - Nadie puede reservarse a sí mismo, y un usuario no puede tener dos sesiones que se crucen, aunque en una sea alumno y en la otra tutor.
-- **Disponibilidad semana a semana, por ramo:** el tutor marca casillas con fecha concreta para cada ramo que imparte. Una casilla marcada para un ramo deja de estar disponible para los otros (la base lo impide con un `EXCLUDE` sobre `tutor_id` y el rango, como en `sesiones`). Falta definir la duración de una casilla.
+- **Disponibilidad semana a semana, por ramo:** el tutor marca casillas con fecha concreta para cada ramo que imparte. Una casilla marcada para un ramo deja de estar disponible para los otros (la base lo impide con un `EXCLUDE` sobre `tutor_id` y el rango, como en `sesiones`).
+- **Casillas = bloques de clase de la universidad** (acordado el 2026-11-16): 90 minutos, de lunes a viernes, con horario fijo en hora de Chile: A 08:10, B 09:55, C 11:40, (almuerzo), D 14:30, E 16:15 y F 18:00. Una sesión ocupa exactamente una casilla. El front dibuja la grilla con estos bloques y los manda en UTC; Sesiones valida con la zona `America/Santiago` que la casilla empieza en un bloque. Detalle, migración V3 y `sesiones.proto` propuesto en `propuestas/sesiones.md` del repo de contratos.
 - **Reservar:** el alumno solo puede tomar una casilla disponible de ese tutor y ese ramo; `CrearSesion` lo valida.
 - **Confirmación:** la reserva queda `PENDIENTE` hasta que el tutor la confirme. Rechazarla es cancelarla. Mientras está pendiente, el horario ya queda bloqueado para otros alumnos.
 - **Desmarcar:** un horario con una sesión `PENDIENTE` o `CONFIRMADA` no se puede desmarcar (`FAILED_PRECONDITION`); primero se cancela la sesión.
@@ -117,16 +118,15 @@ Detalle completo, modelo de MongoDB y `material.proto` propuesto en `propuestas/
 - Patrón puerto/adaptador por servicio: `src/sesiones/` tiene el puerto (`SESIONES_PORT` / `SesionesPort`), dos adaptadores (`SesionesGrpc`, real, con `@grpc/grpc-js` + `@grpc/proto-loader`; `SesionesMock`, en memoria), modelos GraphQL y resolver. El adaptador se elige solo en `sesiones.module.ts`: gRPC si existe la variable `SESIONES_GRPC_URL` (ej. `localhost:9090`), si no el mock.
 - Usuario actual: decorador `@UsuarioId()` que lee la cabecera `x-usuario-id` (temporal, sin autenticación). Se reemplaza por el JWT de Usuarios (ver Contratos).
 - El `.proto` de Sesiones se lee desde el submódulo `contracts/` (`contracts/proto/sesiones/v1/sesiones.proto`); la carpeta `proto/` del BFF ya no existe.
+- **Temporal (rama `feat/casillas-disponibilidad`):** el submódulo tiene una modificación local, sin commitear, con el `sesiones.proto` de `propuestas/sesiones.md`. Cuando el PR de contratos se mergee, descartarla y actualizar el submódulo a ese commit.
+- Casillas: queries `disponibilidad(tutorId, desde, hasta)` y `buscarDisponibilidad(ramoCodigo, desde, hasta)`, mutaciones `marcarCasilla(ramoCodigo, inicio)` y `desmarcarCasilla(id)`, y filtros `estado`, `desde` y `hasta` en `sesiones`. La semana del tutor se pide con `disponibilidad` y `sesiones` en una sola consulta GraphQL. El mock aplica las mismas reglas que Sesiones (bloques en `America/Santiago`, casilla libre, cruces, solo el tutor confirma), salvo `ValidarTutorRamo`, que siempre acepta.
 - Aún no hay módulos de Usuarios (gRPC), Material (gRPC) ni Agente (REST).
 
 ### Aviso para el frontend (leer antes de manejar errores)
 
 Cuando un compañero empiece el frontend, recordarle esto:
 
-- Los errores de GraphQL **todavía no tienen un `extensions.code` confiable**: los 404 y 409 salen como `INTERNAL_SERVER_ERROR`. Solo 400 (`BAD_REQUEST`) y 403 (`FORBIDDEN`) salen bien.
-- Para distinguir errores, usar **`extensions.status`** (404 no existe, 409 choque de horario o transición de estado inválida, 403 no participa, 400 datos inválidos, 503 servicio caído). Ese campo ya es correcto y se va a mantener.
-- No escribir lógica que dependa de `code === 'INTERNAL_SERVER_ERROR'`: se va a corregir.
-- Pendiente en el BFF: agregar `formatError` en `app.module.ts` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc., y avisar al frontend cuando esté.
+- Para distinguir errores, usar **`extensions.code`**: `BAD_REQUEST` (datos inválidos, horario que no es un bloque, reservarse a sí mismo), `UNAUTHENTICATED` (sin usuario), `FORBIDDEN` (no participa, casilla ajena, solo el tutor confirma), `NOT_FOUND`, `CONFLICT` (casilla ocupada o solapada, cruce de horario, transición de estado inválida, desmarcar con sesión activa) y `SERVICE_UNAVAILABLE` (servicio caído). Lo traduce `formatError` en `app.module.ts`.
 - El `stacktrace` que aparece en las respuestas es solo de desarrollo; en Kubernetes se oculta con `NODE_ENV=production`.
 - Las mutations de sesiones (`crearSesion`, `confirmarSesion`, `cancelarSesion`, `finalizarSesion`) requieren la cabecera `x-usuario-id` (temporal, hasta que exista el login); sin ella responden 401. Cuando entre el login, esa cabecera se reemplaza por `Authorization: Bearer <token>`.
 
@@ -155,10 +155,8 @@ Decisiones de los contratos que afectan al BFF:
 Pendientes del lado de los contratos:
 
 - Las propuestas de Usuarios y Material están en `propuestas/` del repo de contratos (rama `propuestas/usuarios-material`, PR por abrir). Una vez aprobadas, su `.proto` reemplaza al de `proto/` en otro PR, y el BFF y Sesiones actualizan el submódulo.
-- Agregar `tutor_id` y `ramo_codigo` a `VerificarParticipacionResponse` en `sesiones.proto` (campos nuevos, cambio seguro), para que Material guarde la evaluación con una sola llamada. Lo implementa Sesiones.
-- El contrato del agente sigue en borrador; Pablo todavía no lo define.
-- Cambiar `sesiones.proto` para las decisiones del flujo: `BloqueDisponibilidad` con `ramo_codigo`, `inicio` y `fin` (Timestamp) en vez de `dia`, `hora_ini` y `hora_fin`; RPC para marcar y desmarcar casillas; `ObtenerDisponibilidad` por rango de fechas; `ListarSesiones` con filtros de estado y rango de fechas. Cambiar tipos exige `v2` según el README de contratos, pero el único otro consumidor de esos campos es el agente (borrador): proponer cambiar `v1` con el visto bueno del equipo antes de que alguien lo implemente.
-- Coordinar con Pablo (Usuarios): los datos personales que pida el formulario de registro (hoy `Usuario` solo tiene nombre y email) y quién carga el catálogo de ramos.
+- El cambio de `sesiones.proto` está propuesto en `propuestas/sesiones.md` (rama `propuestas/sesiones` del repo de contratos, PR por abrir): casillas con ramo y fecha, `MarcarCasilla`, `DesmarcarCasilla`, `BuscarDisponibilidad`, rango en `ObtenerDisponibilidad`, filtros en `ListarSesiones` y `tutor_id` y `ramo_codigo` en `VerificarParticipacionResponse`. Sigue en `v1`: el único cambio que rompe es la forma de `BloqueDisponibilidad`, que solo usa el BFF, así que Sesiones y el BFF se actualizan juntos.
+- El contrato del agente sigue en borrador; Pablo todavía no lo define.- Coordinar con Pablo (Usuarios): los datos personales que pida el formulario de registro (hoy `Usuario` solo tiene nombre y email) y quién carga el catálogo de ramos.
 
 ## Convenciones
 
@@ -185,20 +183,20 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 ## Próximos pasos
 
-1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). Pendiente: PR de las propuestas y luego el de los `.proto`; proponer el cambio de `sesiones.proto` para la disponibilidad semanal y los campos nuevos de `VerificarParticipacion`; definir el flujo del alumno, la duración de una casilla y el contrato del agente.
+1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). ✅ Bloques horarios acordados y cambio de `sesiones.proto` redactado en `propuestas/sesiones.md` (2026-11-16). Pendiente: PR de la propuesta de Sesiones y luego los de los `.proto` de los tres servicios; confirmar que no hay tutorías los sábados; definir el contrato del agente.
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12): los RPC responden según el contrato y los eventos `sesion.creada`, `sesion.finalizada` y `sesion.cancelada` llegan a Kafka. Pendiente (ver "Decisiones del flujo"):
    1. Cliente gRPC a `Usuarios.ValidarTutorRamo`, con un mock mientras Usuarios no esté, usado al crear una sesión y al marcar disponibilidad (`FAILED_PRECONDITION` si no tiene ese ramo activo).
    2. Migración V3: disponibilidad con fecha concreta, ramo y `EXCLUDE` contra solapes del mismo tutor.
-   3. RPC nuevos de disponibilidad y filtros de `ListarSesiones`, una vez acordado el cambio de contrato.
+   3. RPC nuevos de disponibilidad (`MarcarCasilla`, `DesmarcarCasilla`, `ObtenerDisponibilidad` por rango, `BuscarDisponibilidad`) y filtros de `ListarSesiones`, según `propuestas/sesiones.md`, una vez aprobado. Validar que cada casilla empiece en un bloque (zona `America/Santiago`) y dure 90 minutos.
    4. Validaciones al crear: casilla disponible de ese tutor y ramo, no reservarse a sí mismo, sin cruce con otras sesiones del usuario como alumno o tutor.
    5. Desmarcar falla si hay una sesión pendiente o confirmada en ese horario.
    6. Tarea programada: finalizar las confirmadas vencidas y cancelar las pendientes no confirmadas a tiempo, publicando sus eventos.
    7. `VerificarParticipacion` devuelve también `tutor_id` y `ramo_codigo`, una vez aprobado en el contrato.
 3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden:
-   1. `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
+   1. ✅ `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
    2. Módulo `usuarios/` (puerto + mock + gRPC), según `propuestas/usuarios.md`: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`.
    3. Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio.
-   4. Sesiones según las decisiones del flujo: filtro por estado y rango de fechas en `sesiones`, una query para la semana del tutor (disponibilidad + reservas en un rango), mutaciones para marcar y desmarcar casillas.
+   4. ✅ Sesiones según `propuestas/sesiones.md` (casillas, búsqueda, filtros, mock con las mismas reglas; `crearSesion` solo pide `inicio` y el BFF calcula el fin), probado de punta a punta contra Sesiones real (2026-11-16, 25 casos). Pendiente: actualizar el submódulo cuando se mergee el PR de contratos.
    5. Módulo `material/` (puerto + mock + gRPC), según `propuestas/material.md`:
       - GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y el promedio y la cantidad de evaluaciones en los tutores del buscador, resueltos en lote con `ObtenerResumenTutores`.
       - REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`.
