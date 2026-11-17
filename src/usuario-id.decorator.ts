@@ -4,15 +4,20 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { verificarToken } from './jwt';
 
-// shortcut: confía en la cabecera x-usuario-id sin autenticar; reemplazar por un token verificado cuando exista el login de Usuarios.
+// Id del usuario actual, sacado del JWT de la cabecera "Authorization: Bearer <token>".
 export const UsuarioId = createParamDecorator(
   (_: unknown, ctx: ExecutionContext): string => {
-    const id =
-      GqlExecutionContext.create(ctx).getContext().req.headers['x-usuario-id'];
-    if (typeof id !== 'string' || !id) {
-      throw new UnauthorizedException('Falta la cabecera x-usuario-id');
+    const cabecera: unknown =
+      GqlExecutionContext.create(ctx).getContext().req.headers.authorization;
+    const token =
+      typeof cabecera === 'string' && /^Bearer (\S+)$/.exec(cabecera)?.[1];
+    if (!token) {
+      throw new UnauthorizedException(
+        'Falta la cabecera Authorization: Bearer <token>',
+      );
     }
-    return id;
+    return verificarToken(token);
   },
 );

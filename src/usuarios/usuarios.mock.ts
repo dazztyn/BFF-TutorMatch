@@ -19,6 +19,7 @@ import type {
   RegistroInput,
   Usuario,
 } from './usuarios.models';
+import { firmarToken } from '../jwt';
 import type { UsuariosPort } from './usuarios.port';
 
 // Catálogo de ejemplo; el real lo carga el servicio de Usuarios.
@@ -164,8 +165,8 @@ export class UsuariosMock implements UsuariosPort {
   }
 
   private acceso(cuenta: Cuenta): Acceso {
-    // shortcut: token de mentira con el id, sin firmar; se reemplaza por el JWT en el paso de autenticación.
-    return { token: `mock.${cuenta.id}`, usuario: aUsuario(cuenta) };
+    // Firmado igual que Usuarios, así pasar al servicio real no cambia la verificación.
+    return { token: firmarToken(cuenta.id), usuario: aUsuario(cuenta) };
   }
 
   private cuenta(id: string): Cuenta {

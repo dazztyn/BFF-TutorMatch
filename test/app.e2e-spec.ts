@@ -2,14 +2,24 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import jwt from 'jsonwebtoken';
 import { AppModule } from './../src/app.module';
+import { firmarToken } from './../src/jwt';
 
-describe('GraphQL de sesiones (e2e)', () => {
+describe('GraphQL del BFF (e2e)', () => {
   let app: INestApplication<App>;
 
-  const gql = (query: string, usuarioId?: string) => {
+  // usuario: id al que se le firma un token, o un token ya armado con "Bearer ".
+  const gql = (query: string, usuario?: string) => {
     const peticion = request(app.getHttpServer()).post('/graphql');
-    if (usuarioId) peticion.set('x-usuario-id', usuarioId);
+    if (usuario) {
+      peticion.set(
+        'Authorization',
+        usuario.startsWith('Bearer ')
+          ? usuario
+          : `Bearer ${firmarToken(usuario)}`,
+      );
+    }
     return peticion.send({ query }).expect(200);
   };
 
@@ -74,6 +84,26 @@ describe('GraphQL de sesiones (e2e)', () => {
 
     const { body: sinCabecera } = await gql(crear);
     expect(sinCabecera.errors[0].extensions.code).toBe('UNAUTHENTICATED');
+
+    const ajeno = jwt.sign({ sub: 'est-1' }, 'otro-secreto');
+    const { body: firmaAjena } = await gql(crear, `Bearer ${ajeno}`);
+    expect(firmaAjena.errors[0].extensions.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('se registra, inicia sesión y usa el token', async () => {
+    const { body: registro } = await gql(`mutation {
+      registro(input: { nombre: "Ana", email: "ana@uc.cl", password: "secreta123" }) { usuario { id } }
+    }`);
+    const { id } = registro.data.registro.usuario;
+
+    const { body: login } = await gql(`mutation {
+      login(input: { email: "ana@uc.cl", password: "secreta123" }) { token }
+    }`);
+    const { body } = await gql(
+      `{ yo { id esTutor } }`,
+      `Bearer ${login.data.login.token}`,
+    );
+    expect(body.data.yo).toEqual({ id, esTutor: false });
   });
 
   afterEach(async () => {
