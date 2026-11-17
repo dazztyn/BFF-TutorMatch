@@ -61,7 +61,10 @@ describe('SesionesMock', () => {
     expect((await mock.confirmar(id, 'tut-1')).estado).toBe(
       EstadoSesion.CONFIRMADA,
     );
-    expect((await mock.finalizar(id, 'est-1')).estado).toBe(
+    await expect(mock.finalizar(id, 'est-1')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect((await mock.finalizar(id, 'tut-1')).estado).toBe(
       EstadoSesion.FINALIZADA,
     );
   });

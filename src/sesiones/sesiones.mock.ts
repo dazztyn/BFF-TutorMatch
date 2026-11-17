@@ -128,9 +128,7 @@ export class SesionesMock implements SesionesPort {
   }
 
   async confirmar(id: string, usuarioId: string): Promise<Sesion> {
-    if ((await this.obtener(id)).tutorId !== usuarioId) {
-      throw new ForbiddenException('Solo el tutor puede confirmar la sesión');
-    }
+    await this.exigirTutor(id, usuarioId, 'confirmar');
     return this.cambiarEstado(id, usuarioId, CONFIRMADA);
   }
 
@@ -138,8 +136,15 @@ export class SesionesMock implements SesionesPort {
     return this.cambiarEstado(id, usuarioId, CANCELADA);
   }
 
-  finalizar(id: string, usuarioId: string): Promise<Sesion> {
+  async finalizar(id: string, usuarioId: string): Promise<Sesion> {
+    await this.exigirTutor(id, usuarioId, 'finalizar');
     return this.cambiarEstado(id, usuarioId, FINALIZADA);
+  }
+
+  private async exigirTutor(id: string, usuarioId: string, accion: string) {
+    if ((await this.obtener(id)).tutorId !== usuarioId) {
+      throw new ForbiddenException(`Solo el tutor puede ${accion} la sesión`);
+    }
   }
 
   async marcarCasilla(
