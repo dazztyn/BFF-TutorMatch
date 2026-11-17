@@ -2,24 +2,22 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+"""
+Casilla de disponibilidad: un bloque de clase de 90 minutos para un ramo
+"""
 type BloqueDisponibilidad {
-  """Día de la semana ISO: 1 = lunes ... 7 = domingo"""
-  dia: Int!
+  fin: DateTime!
+  id: ID!
+  inicio: DateTime!
 
-  """
-  Hora local en formato "HH:mm"
-  """
-  horaFin: String!
-
-  """
-  Hora local en formato "HH:mm"
-  """
-  horaIni: String!
+  """false si tiene encima una sesión PENDIENTE o CONFIRMADA"""
+  libre: Boolean!
+  ramoCodigo: String!
   tutorId: ID!
 }
 
 input CrearSesionInput {
-  fin: DateTime!
+  """Inicio de una casilla libre del tutor, en UTC"""
   inicio: DateTime!
   ramoCodigo: String!
   tutorId: ID!
@@ -41,13 +39,27 @@ type Mutation {
   cancelarSesion(id: ID!): Sesion!
   confirmarSesion(id: ID!): Sesion!
   crearSesion(input: CrearSesionInput!): Sesion!
+  desmarcarCasilla(id: ID!): Boolean!
   finalizarSesion(id: ID!): Sesion!
+  marcarCasilla(
+    """Inicio de un bloque de clase, en UTC"""
+    inicio: DateTime!
+    ramoCodigo: String!
+  ): BloqueDisponibilidad!
 }
 
 type Query {
-  disponibilidad(tutorId: ID!): [BloqueDisponibilidad!]!
+  """
+  Casillas libres de todos los tutores de un ramo que empiezan en [desde, hasta)
+  """
+  buscarDisponibilidad(desde: DateTime!, hasta: DateTime!, ramoCodigo: String!): [BloqueDisponibilidad!]!
+
+  """Casillas de un tutor que empiezan en [desde, hasta)"""
+  disponibilidad(desde: DateTime!, hasta: DateTime!, tutorId: ID!): [BloqueDisponibilidad!]!
   sesion(id: ID!): Sesion
-  sesiones(estudianteId: ID, tutorId: ID): [Sesion!]!
+
+  """Filtros opcionales; desde y hasta se aplican al inicio"""
+  sesiones(desde: DateTime, estado: EstadoSesion, estudianteId: ID, hasta: DateTime, tutorId: ID): [Sesion!]!
 }
 
 type Sesion {

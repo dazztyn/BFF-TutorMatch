@@ -2,7 +2,6 @@ import {
   Field,
   ID,
   InputType,
-  Int,
   ObjectType,
   registerEnumType,
 } from '@nestjs/graphql';
@@ -42,25 +41,14 @@ export class Sesion {
   creadaEn: Date;
 }
 
-@ObjectType()
+@ObjectType({
+  description:
+    'Casilla de disponibilidad: un bloque de clase de 90 minutos para un ramo',
+})
 export class BloqueDisponibilidad {
   @Field(() => ID)
-  tutorId: string;
+  id: string;
 
-  @Field(() => Int, {
-    description: 'Día de la semana ISO: 1 = lunes ... 7 = domingo',
-  })
-  dia: number;
-
-  @Field({ description: 'Hora local en formato "HH:mm"' })
-  horaIni: string;
-
-  @Field({ description: 'Hora local en formato "HH:mm"' })
-  horaFin: string;
-}
-
-@InputType()
-export class CrearSesionInput {
   @Field(() => ID)
   tutorId: string;
 
@@ -72,4 +60,25 @@ export class CrearSesionInput {
 
   @Field()
   fin: Date;
+
+  @Field({
+    description: 'false si tiene encima una sesión PENDIENTE o CONFIRMADA',
+  })
+  libre: boolean;
+}
+
+// Una casilla y una sesión duran siempre un bloque de clase.
+export const DURACION_BLOQUE_MS = 90 * 60 * 1000;
+
+// El fin no se pide: el BFF lo calcula como inicio + 90 minutos.
+@InputType()
+export class CrearSesionInput {
+  @Field(() => ID)
+  tutorId: string;
+
+  @Field()
+  ramoCodigo: string;
+
+  @Field({ description: 'Inicio de una casilla libre del tutor, en UTC' })
+  inicio: Date;
 }

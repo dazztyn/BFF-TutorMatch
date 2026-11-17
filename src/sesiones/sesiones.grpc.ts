@@ -11,14 +11,24 @@ import {
 } from '@nestjs/common';
 import type {
   BloqueDisponibilidad,
-  CrearSesionInput,
   EstadoSesion,
   Sesion,
 } from './sesiones.models';
-import type { SesionesPort } from './sesiones.port';
+import type {
+  FiltroSesiones,
+  NuevaSesion,
+  SesionesPort,
+} from './sesiones.port';
 
 // Se resuelve desde la raíz del proyecto: en Docker ahora hay que copiar contracts/proto/, no proto/
-const PROTO = join(process.cwd(), 'contracts', 'proto', 'sesiones', 'v1', 'sesiones.proto');
+const PROTO = join(
+  process.cwd(),
+  'contracts',
+  'proto',
+  'sesiones',
+  'v1',
+  'sesiones.proto',
+);
 const PLAZO_MS = 5000;
 
 // google.protobuf.Timestamp tal como lo entrega proto-loader (longs: String).
@@ -64,7 +74,24 @@ const aSesion = (s: SesionProto): Sesion => ({
   creadaEn: aDate(s.creadaEn),
 });
 
-// Traduce los códigos de estado del contrato (ver proto/sesiones.proto) a errores HTTP/GraphQL.
+const aBloque = (
+  b: Omit<BloqueDisponibilidad, 'inicio' | 'fin'> & {
+    inicio: Timestamp;
+    fin: Timestamp;
+  },
+): BloqueDisponibilidad => ({
+  id: b.id,
+  tutorId: b.tutorId,
+  ramoCodigo: b.ramoCodigo,
+  inicio: aDate(b.inicio),
+  fin: aDate(b.fin),
+  libre: b.libre,
+});
+
+// Un Timestamp ausente en proto3 es "sin filtro".
+const talVez = (d?: Date) => (d ? aTimestamp(d) : undefined);
+
+// Traduce los códigos de estado del contrato (ver la cabecera de sesiones.proto) a errores HTTP/GraphQL.
 export const aExcepcion = (err: grpc.ServiceError): Error => {
   switch (err.code) {
     case grpc.status.NOT_FOUND:
@@ -107,9 +134,7 @@ export class SesionesGrpc implements SesionesPort, OnModuleDestroy {
     this.cliente.close();
   }
 
-  async crear(
-    datos: CrearSesionInput & { estudianteId: string },
-  ): Promise<Sesion> {
+  async crear(datos: NuevaSesion): Promise<Sesion> {
     return aSesion(
       await this.llamar('CrearSesion', {
         ...datos,
@@ -123,11 +148,12 @@ export class SesionesGrpc implements SesionesPort, OnModuleDestroy {
     return aSesion(await this.llamar('ObtenerSesion', { id }));
   }
 
-  async listar(filtro: {
-    tutorId?: string;
-    estudianteId?: string;
-  }): Promise<Sesion[]> {
-    const res = await this.llamar('ListarSesiones', filtro);
+  async listar(filtro: FiltroSesiones): Promise<Sesion[]> {
+    const res = await this.llamar('ListarSesiones', {
+      ...filtro,
+      desde: talVez(filtro.desde),
+      hasta: talVez(filtro.hasta),
+    });
     return res.sesiones.map(aSesion);
   }
 
@@ -143,11 +169,48 @@ export class SesionesGrpc implements SesionesPort, OnModuleDestroy {
     return aSesion(await this.llamar('FinalizarSesion', { id, usuarioId }));
   }
 
+  async marcarCasilla(
+    tutorId: string,
+    ramoCodigo: string,
+    inicio: Date,
+  ): Promise<BloqueDisponibilidad> {
+    return aBloque(
+      await this.llamar('MarcarCasilla', {
+        tutorId,
+        ramoCodigo,
+        inicio: aTimestamp(inicio),
+      }),
+    );
+  }
+
+  async desmarcarCasilla(id: string, tutorId: string): Promise<void> {
+    await this.llamar('DesmarcarCasilla', { id, tutorId });
+  }
+
   async obtenerDisponibilidad(
     tutorId: string,
+    desde: Date,
+    hasta: Date,
   ): Promise<BloqueDisponibilidad[]> {
-    const res = await this.llamar('ObtenerDisponibilidad', { tutorId });
-    return res.bloques;
+    const res = await this.llamar('ObtenerDisponibilidad', {
+      tutorId,
+      desde: aTimestamp(desde),
+      hasta: aTimestamp(hasta),
+    });
+    return res.bloques.map(aBloque);
+  }
+
+  async buscarDisponibilidad(
+    ramoCodigo: string,
+    desde: Date,
+    hasta: Date,
+  ): Promise<BloqueDisponibilidad[]> {
+    const res = await this.llamar('BuscarDisponibilidad', {
+      ramoCodigo,
+      desde: aTimestamp(desde),
+      hasta: aTimestamp(hasta),
+    });
+    return res.bloques.map(aBloque);
   }
 
   private llamar(metodo: string, req: object): Promise<any> {
