@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import { SesionesModule } from './sesiones/sesiones.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
 
 // Apollo solo traduce 400, 401 y 403; el resto de las excepciones HTTP de Nest saldrían como INTERNAL_SERVER_ERROR.
 const CODIGOS: Record<number, string> = {
@@ -30,6 +31,7 @@ const CODIGOS: Record<number, string> = {
       },
     }),
     SesionesModule,
+    UsuariosModule,
   ],
 })
 export class AppModule {}

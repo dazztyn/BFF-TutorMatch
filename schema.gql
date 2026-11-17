@@ -2,6 +2,13 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+"""Respuesta de registro y login"""
+type Acceso {
+  """JWT para la cabecera Authorization"""
+  token: String!
+  usuario: Usuario!
+}
+
 """
 Casilla de disponibilidad: un bloque de clase de 90 minutos para un ramo
 """
@@ -35,17 +42,44 @@ enum EstadoSesion {
   PENDIENTE
 }
 
+"""Datos del formulario de verificación para un ramo"""
+input InscripcionRamoInput {
+  """Escala chilena, de 4.0 a 7.0"""
+  notaAprobacion: Float!
+
+  """
+  Año y semestre, ej. "2025-2"
+  """
+  periodoAprobacion: String!
+  ramoCodigo: String!
+}
+
+input LoginInput {
+  email: String!
+  password: String!
+}
+
 type Mutation {
+  """Formulario de inscripción como tutor; todo o nada si un ramo falla"""
+  agregarRamosTutor(ramos: [InscripcionRamoInput!]!): Usuario!
   cancelarSesion(id: ID!): Sesion!
   confirmarSesion(id: ID!): Sesion!
   crearSesion(input: CrearSesionInput!): Sesion!
   desmarcarCasilla(id: ID!): Boolean!
   finalizarSesion(id: ID!): Sesion!
+  login(input: LoginInput!): Acceso!
   marcarCasilla(
     """Inicio de un bloque de clase, en UTC"""
     inicio: DateTime!
     ramoCodigo: String!
   ): BloqueDisponibilidad!
+
+  """Deja de impartir un ramo; se puede reactivar"""
+  quitarRamoTutor(ramoCodigo: String!): Usuario!
+
+  """Vuelve a impartir un ramo quitado, sin repetir el formulario"""
+  reactivarRamoTutor(ramoCodigo: String!): Usuario!
+  registro(input: RegistroInput!): Acceso!
 }
 
 type Query {
@@ -56,19 +90,65 @@ type Query {
 
   """Casillas de un tutor que empiezan en [desde, hasta)"""
   disponibilidad(desde: DateTime!, hasta: DateTime!, tutorId: ID!): [BloqueDisponibilidad!]!
+
+  """Catálogo de ramos"""
+  ramos: [Ramo!]!
   sesion(id: ID!): Sesion
 
   """Filtros opcionales; desde y hasta se aplican al inicio"""
   sesiones(desde: DateTime, estado: EstadoSesion, estudianteId: ID, hasta: DateTime, tutorId: ID): [Sesion!]!
+
+  """Tutores con ese ramo activo"""
+  tutoresPorRamo(ramoCodigo: String!): [Usuario!]!
+
+  """El usuario actual"""
+  yo: Usuario!
+}
+
+type Ramo {
+  """
+  Ej. "MAT1610"
+  """
+  codigo: String!
+  nombre: String!
+}
+
+"""Un ramo en el que el usuario se inscribió como tutor"""
+type RamoTutor {
+  """false si el tutor lo quitó; puede reactivarlo"""
+  activo: Boolean!
+  ramo: Ramo!
+}
+
+input RegistroInput {
+  email: String!
+  nombre: String!
+  password: String!
 }
 
 type Sesion {
   creadaEn: DateTime!
   estado: EstadoSesion!
+
+  """null si el usuario ya no existe"""
+  estudiante: Usuario
   estudianteId: ID!
   fin: DateTime!
   id: ID!
   inicio: DateTime!
   ramoCodigo: String!
+
+  """null si el usuario ya no existe"""
+  tutor: Usuario
   tutorId: ID!
+}
+
+type Usuario {
+  email: String!
+
+  """Verdadero si tiene al menos un ramo activo; solo decide qué portal ve"""
+  esTutor: Boolean!
+  id: ID!
+  nombre: String!
+  ramos: [RamoTutor!]!
 }
