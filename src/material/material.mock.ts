@@ -9,6 +9,10 @@ import { EstadoSesion } from '../sesiones/sesiones.models';
 import type { SesionesPort } from '../sesiones/sesiones.port';
 import type { UsuariosPort } from '../usuarios/usuarios.port';
 import {
+  type ArchivoDescargado,
+  type ArchivoSubido,
+  TAMANO_MAXIMO_BYTES,
+  TIPOS_PERMITIDOS,
   type EvaluacionesTutor,
   type EvaluacionPropia,
   type Material,
@@ -22,6 +26,8 @@ import type { FiltroMaterial, MaterialPort } from './material.port';
 // con sus mocks que con los servicios reales.
 export class MaterialMock implements MaterialPort {
   private readonly materiales = new Map<string, Material>();
+  // Bytes de cada ARCHIVO, por id de material.
+  private readonly datos = new Map<string, Buffer>();
   // Clave: sesionId (una evaluación por sesión). Guarda al alumno solo para validar.
   private readonly evaluaciones = new Map<
     string,
@@ -71,6 +77,54 @@ export class MaterialMock implements MaterialPort {
     return candidatos.filter((_, i) => visibles[i]);
   }
 
+  async subirArchivo(
+    tutorId: string,
+    ramoCodigo: string,
+    titulo: string,
+    archivo: ArchivoSubido,
+  ): Promise<Material> {
+    if (!ramoCodigo || !titulo.trim() || !archivo.datos.length) {
+      throw new BadRequestException('Faltan el ramo, el título o el archivo');
+    }
+    if (
+      archivo.datos.length > TAMANO_MAXIMO_BYTES ||
+      !TIPOS_PERMITIDOS.includes(archivo.tipoMime)
+    ) {
+      throw new BadRequestException(
+        'El archivo debe ser PDF, PNG o JPEG de hasta 10 MB',
+      );
+    }
+    await this.exigirRamoActivo(tutorId, ramoCodigo);
+    const material: Material = {
+      id: randomUUID(),
+      tutorId,
+      ramoCodigo,
+      tipo: TipoMaterial.ARCHIVO,
+      titulo: titulo.trim(),
+      texto: null,
+      archivo: {
+        nombre: archivo.nombre,
+        tipoMime: archivo.tipoMime,
+        tamanoBytes: archivo.datos.length,
+      },
+      creadoEn: new Date(),
+    };
+    this.materiales.set(material.id, material);
+    this.datos.set(material.id, archivo.datos);
+    return material;
+  }
+
+  async descargar(id: string, usuarioId: string): Promise<ArchivoDescargado> {
+    const material = this.materiales.get(id);
+    if (!material || !(await this.puedeVer(usuarioId, material))) {
+      throw new NotFoundException(`No existe el material ${id}`);
+    }
+    if (!material.archivo) {
+      throw new BadRequestException('Un aviso no tiene archivo que descargar');
+    }
+    return { archivo: material.archivo, datos: this.datos.get(id)! };
+  }
+
   async eliminar(id: string, tutorId: string): Promise<void> {
     const material = this.materiales.get(id);
     // Si no puede verlo, se responde como si no existiera.
@@ -81,6 +135,7 @@ export class MaterialMock implements MaterialPort {
       throw new ForbiddenException('Solo el dueño puede eliminar el material');
     }
     this.materiales.delete(id);
+    this.datos.delete(id);
   }
 
   async evaluar(

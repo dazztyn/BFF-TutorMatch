@@ -3,6 +3,7 @@ import { SesionesModule } from '../sesiones/sesiones.module';
 import { SESIONES_PORT, type SesionesPort } from '../sesiones/sesiones.port';
 import { UsuariosModule } from '../usuarios/usuarios.module';
 import { USUARIOS_PORT, type UsuariosPort } from '../usuarios/usuarios.port';
+import { ArchivosController } from './archivos.controller';
 import {
   EvaluacionesResolver,
   ResumenTutorResolver,
@@ -15,6 +16,7 @@ import { MaterialResolver } from './material.resolver';
 @Module({
   // El mock consulta Sesiones (visibilidad) y Usuarios (ramo activo) por sus puertos.
   imports: [SesionesModule, UsuariosModule],
+  controllers: [ArchivosController],
   providers: [
     MaterialResolver,
     EvaluacionesResolver,

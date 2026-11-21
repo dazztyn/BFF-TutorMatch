@@ -116,3 +116,19 @@ export interface ResumenTutor {
   promedio: number;
   cantidad: number;
 }
+
+// Reglas de archivos del contrato: PDF, PNG o JPEG, hasta 10 MB.
+export const TIPOS_PERMITIDOS = ['application/pdf', 'image/png', 'image/jpeg'];
+export const TAMANO_MAXIMO_BYTES = 10 * 1024 * 1024;
+
+// Archivo tal como lo sube el tutor.
+export interface ArchivoSubido {
+  nombre: string;
+  tipoMime: string;
+  datos: Buffer;
+}
+
+export interface ArchivoDescargado {
+  archivo: Archivo;
+  datos: Buffer;
+}

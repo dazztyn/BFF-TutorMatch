@@ -1,6 +1,8 @@
 import type { OnModuleDestroy } from '@nestjs/common';
 import { aDate, ClienteGrpc, type Timestamp } from '../grpc';
 import type {
+  ArchivoDescargado,
+  ArchivoSubido,
   EvaluacionesTutor,
   EvaluacionPropia,
   Material,
@@ -83,6 +85,33 @@ export class MaterialGrpc implements MaterialPort, OnModuleDestroy {
       ...filtro,
     });
     return res.materiales.map(aMaterial);
+  }
+
+  async subirArchivo(
+    tutorId: string,
+    ramoCodigo: string,
+    titulo: string,
+    archivo: ArchivoSubido,
+  ): Promise<Material> {
+    return aMaterial(
+      await this.grpc.llamar('SubirMaterial', {
+        tutorId,
+        ramoCodigo,
+        titulo,
+        archivo,
+      }),
+    );
+  }
+
+  async descargar(id: string, usuarioId: string): Promise<ArchivoDescargado> {
+    const { archivo, datos } = await this.grpc.llamar('DescargarArchivo', {
+      id,
+      usuarioId,
+    });
+    return {
+      archivo: { ...archivo, tamanoBytes: Number(archivo.tamanoBytes) },
+      datos,
+    };
   }
 
   async eliminar(id: string, tutorId: string): Promise<void> {

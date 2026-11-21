@@ -33,3 +33,15 @@ export const verificarToken = (token: string): string => {
   }
   throw new UnauthorizedException('Token inválido o vencido');
 };
+
+// Id del usuario de una cabecera "Authorization: Bearer <token>"; 401 si falta o no es válida.
+export const usuarioDeCabecera = (cabecera: unknown): string => {
+  const token =
+    typeof cabecera === 'string' && /^Bearer (\S+)$/.exec(cabecera)?.[1];
+  if (!token) {
+    throw new UnauthorizedException(
+      'Falta la cabecera Authorization: Bearer <token>',
+    );
+  }
+  return verificarToken(token);
+};

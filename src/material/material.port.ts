@@ -1,4 +1,6 @@
 import type {
+  ArchivoDescargado,
+  ArchivoSubido,
   EvaluacionesTutor,
   EvaluacionPropia,
   Material,
@@ -23,6 +25,15 @@ export interface MaterialPort {
   ): Promise<Material>;
   // Solo lo que usuarioId puede ver, del más nuevo al más antiguo; lo decide Material.
   listar(usuarioId: string, filtro: FiltroMaterial): Promise<Material[]>;
+  // El tutor necesita tener el ramo activo.
+  subirArchivo(
+    tutorId: string,
+    ramoCodigo: string,
+    titulo: string,
+    archivo: ArchivoSubido,
+  ): Promise<Material>;
+  // Misma regla de visibilidad que listar.
+  descargar(id: string, usuarioId: string): Promise<ArchivoDescargado>;
   // Solo el dueño.
   eliminar(id: string, tutorId: string): Promise<void>;
   // Solo si la sesión está FINALIZADA, el alumno participó y no la evaluó antes.
