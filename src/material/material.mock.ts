@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { EstadoSesion } from '../sesiones/sesiones.models';
 import type { SesionesPort } from '../sesiones/sesiones.port';
 import type { UsuariosPort } from '../usuarios/usuarios.port';
-import { type Material, TipoMaterial } from './material.models';
+import {
+  type EvaluacionesTutor,
+  type EvaluacionPropia,
+  type Material,
+  type ResumenTutor,
+  TipoMaterial,
+} from './material.models';
 import type { FiltroMaterial, MaterialPort } from './material.port';
 
 // Reemplazo en memoria del servicio de Material, con las reglas del contrato; los datos
@@ -15,6 +22,11 @@ import type { FiltroMaterial, MaterialPort } from './material.port';
 // con sus mocks que con los servicios reales.
 export class MaterialMock implements MaterialPort {
   private readonly materiales = new Map<string, Material>();
+  // Clave: sesionId (una evaluación por sesión). Guarda al alumno solo para validar.
+  private readonly evaluaciones = new Map<
+    string,
+    EvaluacionPropia & { estudianteId: string }
+  >();
 
   constructor(
     private readonly sesiones: SesionesPort,
@@ -71,6 +83,91 @@ export class MaterialMock implements MaterialPort {
     this.materiales.delete(id);
   }
 
+  async evaluar(
+    sesionId: string,
+    estudianteId: string,
+    nota: number,
+    comentario: string,
+  ): Promise<EvaluacionPropia> {
+    if (!Number.isInteger(nota) || nota < 1 || nota > 5) {
+      throw new BadRequestException('La nota debe ser un entero de 1 a 5');
+    }
+    if (comentario.length > 1000) {
+      throw new BadRequestException(
+        'El comentario no puede pasar de 1000 caracteres',
+      );
+    }
+    // Equivale a Sesiones.VerificarParticipacion; una sesión inexistente responde NOT_FOUND.
+    const sesion = await this.sesiones.obtener(sesionId);
+    if (
+      sesion.estado !== EstadoSesion.FINALIZADA ||
+      sesion.estudianteId !== estudianteId
+    ) {
+      throw new ConflictException(
+        'Solo se puede evaluar una sesión finalizada en la que participaste',
+      );
+    }
+    if (this.evaluaciones.has(sesionId)) {
+      throw new ConflictException('Esa sesión ya fue evaluada');
+    }
+    const evaluacion: EvaluacionPropia = {
+      sesionId,
+      tutorId: sesion.tutorId,
+      ramoCodigo: sesion.ramoCodigo,
+      nota,
+      comentario: comentario.trim(),
+      creadaEn: new Date(),
+    };
+    this.evaluaciones.set(sesionId, { ...evaluacion, estudianteId });
+    return evaluacion;
+  }
+
+  async listarEvaluaciones(tutorId: string): Promise<EvaluacionesTutor> {
+    const delTutor = this.delTutor(tutorId);
+    return {
+      ...resumir(delTutor),
+      // Solo los campos públicos: nunca el alumno ni la sesión.
+      evaluaciones: delTutor.map(
+        ({ ramoCodigo, nota, comentario, creadaEn }) => ({
+          ramoCodigo,
+          nota,
+          comentario,
+          creadaEn,
+        }),
+      ),
+    };
+  }
+
+  async listarMisEvaluaciones(
+    estudianteId: string,
+  ): Promise<EvaluacionPropia[]> {
+    return [...this.evaluaciones.values()]
+      .filter((e) => e.estudianteId === estudianteId)
+      .sort((a, b) => b.creadaEn.getTime() - a.creadaEn.getTime())
+      .map(({ sesionId, tutorId, ramoCodigo, nota, comentario, creadaEn }) => ({
+        sesionId,
+        tutorId,
+        ramoCodigo,
+        nota,
+        comentario,
+        creadaEn,
+      }));
+  }
+
+  async obtenerResumenTutores(tutorIds: string[]): Promise<ResumenTutor[]> {
+    return tutorIds.map((tutorId) => ({
+      tutorId,
+      ...resumir(this.delTutor(tutorId)),
+    }));
+  }
+
+  // De la más nueva a la más antigua.
+  private delTutor(tutorId: string) {
+    return [...this.evaluaciones.values()]
+      .filter((e) => e.tutorId === tutorId)
+      .sort((a, b) => b.creadaEn.getTime() - a.creadaEn.getTime());
+  }
+
   // El tutor ve lo suyo; un alumno, lo de un tutor en un ramo si tiene o tuvo una sesión
   // no cancelada con él en ese ramo.
   private async puedeVer(usuarioId: string, m: Material): Promise<boolean> {
@@ -101,3 +198,11 @@ export class MaterialMock implements MaterialPort {
     }
   }
 }
+
+// Promedio y cantidad; 0 y 0 si no hay evaluaciones.
+const resumir = (evaluaciones: { nota: number }[]) => ({
+  promedio: evaluaciones.length
+    ? evaluaciones.reduce((suma, e) => suma + e.nota, 0) / evaluaciones.length
+    : 0,
+  cantidad: evaluaciones.length,
+});

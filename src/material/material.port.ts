@@ -1,4 +1,9 @@
-import type { Material } from './material.models';
+import type {
+  EvaluacionesTutor,
+  EvaluacionPropia,
+  Material,
+  ResumenTutor,
+} from './material.models';
 
 export const MATERIAL_PORT = Symbol('MATERIAL_PORT');
 
@@ -20,4 +25,16 @@ export interface MaterialPort {
   listar(usuarioId: string, filtro: FiltroMaterial): Promise<Material[]>;
   // Solo el dueño.
   eliminar(id: string, tutorId: string): Promise<void>;
+  // Solo si la sesión está FINALIZADA, el alumno participó y no la evaluó antes.
+  evaluar(
+    sesionId: string,
+    estudianteId: string,
+    nota: number,
+    comentario: string,
+  ): Promise<EvaluacionPropia>;
+  // Anónimas: nunca incluyen al alumno ni la sesión.
+  listarEvaluaciones(tutorId: string): Promise<EvaluacionesTutor>;
+  listarMisEvaluaciones(estudianteId: string): Promise<EvaluacionPropia[]>;
+  // Uno por cada id pedido, incluidos los que no tienen evaluaciones (0 y 0).
+  obtenerResumenTutores(tutorIds: string[]): Promise<ResumenTutor[]>;
 }

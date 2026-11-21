@@ -10,10 +10,7 @@ import {
 } from '@nestjs/graphql';
 import { Sesion } from '../sesiones/sesiones.models';
 import { UsuarioId } from '../usuario-id.decorator';
-import {
-  type CargadorUsuarios,
-  crearCargadorUsuarios,
-} from './cargador-usuarios';
+import { type Cargador, crearCargador } from '../cargador';
 import {
   Acceso,
   InscripcionRamoInput,
@@ -115,14 +112,15 @@ export class SesionUsuariosResolver {
     return this.cargador(ctx)(sesion.estudianteId);
   }
 
-  private cargador(ctx: ContextoGraphql): CargadorUsuarios {
-    return (ctx.cargadorUsuarios ??= crearCargadorUsuarios((ids) =>
-      this.usuarios.obtenerUsuarios(ids),
+  private cargador(ctx: ContextoGraphql): Cargador<Usuario> {
+    return (ctx.cargadorUsuarios ??= crearCargador(
+      (ids) => this.usuarios.obtenerUsuarios(ids),
+      (u) => u.id,
     ));
   }
 }
 
 // El contexto GraphQL es un objeto nuevo por request.
 interface ContextoGraphql {
-  cargadorUsuarios?: CargadorUsuarios;
+  cargadorUsuarios?: Cargador<Usuario>;
 }

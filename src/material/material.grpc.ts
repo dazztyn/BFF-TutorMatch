@@ -1,6 +1,12 @@
 import type { OnModuleDestroy } from '@nestjs/common';
 import { aDate, ClienteGrpc, type Timestamp } from '../grpc';
-import type { Material, TipoMaterial } from './material.models';
+import type {
+  EvaluacionesTutor,
+  EvaluacionPropia,
+  Material,
+  ResumenTutor,
+  TipoMaterial,
+} from './material.models';
 import type { FiltroMaterial, MaterialPort } from './material.port';
 
 // Los mensajes llevan archivos de hasta 10 MB; gRPC usa 4 MB por defecto.
@@ -32,6 +38,12 @@ const aMaterial = (m: MaterialProto): Material => ({
     ? { ...m.archivo, tamanoBytes: Number(m.archivo.tamanoBytes) }
     : null,
   creadoEn: aDate(m.creadoEn),
+});
+
+// Las evaluaciones solo traen un Timestamp que convertir.
+const conFecha = <T extends { creadaEn: Timestamp }>(e: T) => ({
+  ...e,
+  creadaEn: aDate(e.creadaEn),
 });
 
 // Adaptador real: llama al servicio de Material (NestJS, Ien) por gRPC.
@@ -75,5 +87,40 @@ export class MaterialGrpc implements MaterialPort, OnModuleDestroy {
 
   async eliminar(id: string, tutorId: string): Promise<void> {
     await this.grpc.llamar('EliminarMaterial', { id, tutorId });
+  }
+
+  async evaluar(
+    sesionId: string,
+    estudianteId: string,
+    nota: number,
+    comentario: string,
+  ): Promise<EvaluacionPropia> {
+    return conFecha(
+      await this.grpc.llamar('Evaluar', {
+        sesionId,
+        estudianteId,
+        nota,
+        comentario,
+      }),
+    );
+  }
+
+  async listarEvaluaciones(tutorId: string): Promise<EvaluacionesTutor> {
+    const res = await this.grpc.llamar('ListarEvaluaciones', { tutorId });
+    return { ...res, evaluaciones: res.evaluaciones.map(conFecha) };
+  }
+
+  async listarMisEvaluaciones(
+    estudianteId: string,
+  ): Promise<EvaluacionPropia[]> {
+    const res = await this.grpc.llamar('ListarMisEvaluaciones', {
+      estudianteId,
+    });
+    return res.evaluaciones.map(conFecha);
+  }
+
+  async obtenerResumenTutores(tutorIds: string[]): Promise<ResumenTutor[]> {
+    return (await this.grpc.llamar('ObtenerResumenTutores', { tutorIds }))
+      .resumenes;
   }
 }

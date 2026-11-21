@@ -3,6 +3,10 @@ import { SesionesModule } from '../sesiones/sesiones.module';
 import { SESIONES_PORT, type SesionesPort } from '../sesiones/sesiones.port';
 import { UsuariosModule } from '../usuarios/usuarios.module';
 import { USUARIOS_PORT, type UsuariosPort } from '../usuarios/usuarios.port';
+import {
+  EvaluacionesResolver,
+  ResumenTutorResolver,
+} from './evaluaciones.resolver';
 import { MaterialGrpc } from './material.grpc';
 import { MaterialMock } from './material.mock';
 import { MATERIAL_PORT } from './material.port';
@@ -13,6 +17,8 @@ import { MaterialResolver } from './material.resolver';
   imports: [SesionesModule, UsuariosModule],
   providers: [
     MaterialResolver,
+    EvaluacionesResolver,
+    ResumenTutorResolver,
     // Único punto donde se elige el adaptador: gRPC si hay URL, si no el mock en memoria.
     {
       provide: MATERIAL_PORT,

@@ -1,6 +1,6 @@
-import { crearCargadorUsuarios } from './cargador-usuarios';
+import { crearCargador } from './cargador';
 
-describe('crearCargadorUsuarios', () => {
+describe('crearCargador', () => {
   it('junta los ids en una sola llamada y deja en null los que no existen', async () => {
     const obtener = jest.fn(async (ids: string[]) =>
       ids
@@ -13,7 +13,7 @@ describe('crearCargadorUsuarios', () => {
           ramos: [],
         })),
     );
-    const cargar = crearCargadorUsuarios(obtener);
+    const cargar = crearCargador(obtener, (u) => u.id);
 
     const [a, b, otraVezA, nadie] = await Promise.all([
       cargar('a'),

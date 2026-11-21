@@ -53,6 +53,39 @@ enum EstadoSesion {
   PENDIENTE
 }
 
+"""
+Evaluación pública de un tutor: sin quién la escribió ni de qué sesión es
+"""
+type EvaluacionAnonima {
+  """Vacío si el alumno no comentó"""
+  comentario: String!
+  creadaEn: DateTime!
+
+  """Entero de 1 a 5"""
+  nota: Int!
+  ramoCodigo: String!
+}
+
+"""Una evaluación vista por el alumno que la escribió"""
+type EvaluacionPropia {
+  comentario: String!
+  creadaEn: DateTime!
+  nota: Int!
+  ramoCodigo: String!
+  sesionId: ID!
+  tutorId: ID!
+}
+
+type EvaluacionesTutor {
+  cantidad: Int!
+
+  """De la más nueva a la más antigua"""
+  evaluaciones: [EvaluacionAnonima!]!
+
+  """0 si el tutor no tiene evaluaciones"""
+  promedio: Float!
+}
+
 """Datos del formulario de verificación para un ramo"""
 input InscripcionRamoInput {
   """Escala chilena, de 4.0 a 7.0"""
@@ -96,6 +129,16 @@ type Mutation {
 
   """Solo el dueño"""
   eliminarMaterial(id: ID!): Boolean!
+
+  """Solo una sesión FINALIZADA en la que participaste, una vez por sesión"""
+  evaluar(
+    """Hasta 1000 caracteres"""
+    comentario: String
+
+    """Entero de 1 a 5"""
+    nota: Int!
+    sesionId: ID!
+  ): EvaluacionPropia!
   finalizarSesion(id: ID!): Sesion!
   login(input: LoginInput!): Acceso!
   marcarCasilla(
@@ -122,10 +165,16 @@ type Query {
   """Casillas de un tutor que empiezan en [desde, hasta)"""
   disponibilidad(desde: DateTime!, hasta: DateTime!, tutorId: ID!): [BloqueDisponibilidad!]!
 
+  """Evaluaciones anónimas de un tutor, con su promedio"""
+  evaluacionesTutor(tutorId: ID!): EvaluacionesTutor!
+
   """
   Material visible para el usuario actual, del más nuevo al más antiguo; filtros opcionales
   """
   material(ramoCodigo: String, tutorId: ID): [Material!]!
+
+  """Evaluaciones escritas por el usuario actual"""
+  misEvaluaciones: [EvaluacionPropia!]!
 
   """Catálogo de ramos"""
   ramos: [Ramo!]!
@@ -185,11 +234,15 @@ enum TipoMaterial {
 }
 
 type Usuario {
+  cantidadEvaluaciones: Int!
   email: String!
 
   """Verdadero si tiene al menos un ramo activo; solo decide qué portal ve"""
   esTutor: Boolean!
   id: ID!
   nombre: String!
+
+  """0 si no tiene evaluaciones"""
+  promedioEvaluaciones: Float!
   ramos: [RamoTutor!]!
 }

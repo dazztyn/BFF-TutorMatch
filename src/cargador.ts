@@ -1,20 +1,20 @@
-import type { Usuario } from './usuarios.models';
+export type Cargador<T> = (id: string) => Promise<T | null>;
 
-export type CargadorUsuarios = (id: string) => Promise<Usuario | null>;
-
-// Junta en una sola llamada a ObtenerUsuarios todos los ids que piden los resolvers en la
-// misma vuelta del event loop (por ejemplo, el tutor de cada sesión de una lista) y
-// recuerda los resultados. Se crea uno por request, así nunca mezcla datos de dos consultas.
-export const crearCargadorUsuarios = (
-  obtener: (ids: string[]) => Promise<Usuario[]>,
-): CargadorUsuarios => {
-  const cache = new Map<string, Promise<Usuario | null>>();
+// Junta en una sola llamada en lote todos los ids que piden los resolvers en la misma
+// vuelta del event loop (por ejemplo, el tutor de cada sesión de una lista) y recuerda
+// los resultados. Se crea uno por request, así nunca mezcla datos de dos consultas.
+// idDe dice a qué id corresponde cada resultado; los ids sin resultado quedan en null.
+export const crearCargador = <T>(
+  obtener: (ids: string[]) => Promise<T[]>,
+  idDe: (t: T) => string,
+): Cargador<T> => {
+  const cache = new Map<string, Promise<T | null>>();
   let lote: string[] = [];
-  let pendiente: Promise<Map<string, Usuario>> | null = null;
+  let pendiente: Promise<Map<string, T>> | null = null;
 
   return (id) => {
-    let usuario = cache.get(id);
-    if (!usuario) {
+    let resultado = cache.get(id);
+    if (!resultado) {
       if (!pendiente) {
         lote = [];
         // setImmediate corre después de que GraphQL llamó a todos los resolvers de la lista.
@@ -22,14 +22,14 @@ export const crearCargadorUsuarios = (
           async () => {
             const ids = lote;
             pendiente = null;
-            return new Map((await obtener(ids)).map((u) => [u.id, u]));
+            return new Map((await obtener(ids)).map((t) => [idDe(t), t]));
           },
         );
       }
       lote.push(id);
-      usuario = pendiente.then((porId) => porId.get(id) ?? null);
-      cache.set(id, usuario);
+      resultado = pendiente.then((porId) => porId.get(id) ?? null);
+      cache.set(id, resultado);
     }
-    return usuario;
+    return resultado;
   };
 };
