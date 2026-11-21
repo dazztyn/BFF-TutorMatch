@@ -12,6 +12,21 @@ import {
 
 const PLAZO_MS = 5000;
 
+// google.protobuf.Timestamp tal como lo entrega proto-loader (longs: String).
+export interface Timestamp {
+  seconds: string | number;
+  nanos: number;
+}
+
+export const aDate = (t: Timestamp): Date =>
+  new Date(Number(t.seconds) * 1000 + Math.floor(t.nanos / 1e6));
+
+export const aTimestamp = (d: Date): Timestamp => {
+  const ms = d.getTime();
+  const seconds = Math.floor(ms / 1000);
+  return { seconds, nanos: (ms - seconds * 1000) * 1e6 };
+};
+
 type Metodo = (
   req: object,
   opciones: grpc.CallOptions,
@@ -48,7 +63,8 @@ export class ClienteGrpc {
   private readonly cliente: grpc.Client & Record<string, Metodo>;
   private readonly nombre: string;
 
-  constructor(servicio: string, url: string) {
+  // opciones: opciones del canal gRPC, por ejemplo el tamaño máximo de mensaje.
+  constructor(servicio: string, url: string, opciones?: grpc.ChannelOptions) {
     this.nombre = servicio[0].toUpperCase() + servicio.slice(1);
     const definicion = protoLoader.loadSync(
       join(
@@ -65,6 +81,7 @@ export class ClienteGrpc {
     this.cliente = new paquete.tutorias[servicio].v1[`${this.nombre}Service`](
       url,
       grpc.credentials.createInsecure(),
+      opciones,
     );
   }
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
+import { MaterialModule } from './material/material.module';
 import { SesionesModule } from './sesiones/sesiones.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 
@@ -32,6 +33,7 @@ const CODIGOS: Record<number, string> = {
     }),
     SesionesModule,
     UsuariosModule,
+    MaterialModule,
   ],
 })
 export class AppModule {}

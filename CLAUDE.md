@@ -121,8 +121,9 @@ Detalle completo, modelo de MongoDB en `propuestas/material.md` del repo de cont
 - El `.proto` de Sesiones se lee desde el submódulo `contracts/` (`contracts/proto/sesiones/v1/sesiones.proto`, contrato de casillas acordado en `2fa0949`); la carpeta `proto/` del BFF ya no existe.
 - Casillas: queries `disponibilidad(tutorId, desde, hasta)` y `buscarDisponibilidad(ramoCodigo, desde, hasta)`, mutaciones `marcarCasilla(ramoCodigo, inicio)` y `desmarcarCasilla(id)`, y filtros `estado`, `desde` y `hasta` en `sesiones`. La semana del tutor se pide con `disponibilidad` y `sesiones` en una sola consulta GraphQL. El mock aplica las mismas reglas que Sesiones (bloques en `America/Santiago`, casilla libre, cruces, solo el tutor confirma y finaliza), salvo `ValidarTutorRamo`, que siempre acepta.
 - `src/usuarios/` sigue el mismo patrón: puerto (`USUARIOS_PORT`), `UsuariosGrpc` si existe `USUARIOS_GRPC_URL` (el servidor de Pablo escucha por defecto en el puerto 50051) y si no `UsuariosMock`. El mock aplica las reglas del contrato (email único sin importar mayúsculas, contraseñas con hash scrypt, `esTutor` calculado desde los ramos activos, inscripción todo o nada, quitar y reactivar) con un catálogo de ramos de ejemplo. Los campos `tutor` y `estudiante` de `Sesion` se piden en lote con `ObtenerUsuarios`: `cargador-usuarios.ts` junta los ids de una consulta en una sola llamada, con un cargador por request en el contexto GraphQL.
-- Cliente gRPC común en `src/grpc.ts` (`ClienteGrpc` y `aExcepcion`): carga `contracts/proto/<servicio>/v1/<servicio>.proto` y traduce los códigos de estado, incluido `UNAUTHENTICATED` → 401. Lo usan los adaptadores de Sesiones y Usuarios.
-- Aún no hay módulos de Material (gRPC) ni Agente (REST).
+- Cliente gRPC común en `src/grpc.ts` (`ClienteGrpc` y `aExcepcion`): carga `contracts/proto/<servicio>/v1/<servicio>.proto` y traduce los códigos de estado, incluido `UNAUTHENTICATED` → 401. Acepta opciones del canal (Material sube el límite de mensaje a 11 MB). También tiene `aDate` y `aTimestamp` para `google.protobuf.Timestamp`. Lo usan los adaptadores de Sesiones, Usuarios y Material.
+- `src/material/` sigue el mismo patrón: puerto (`MATERIAL_PORT`), `MaterialGrpc` si existe `MATERIAL_GRPC_URL` y si no `MaterialMock`. Por ahora cubre los avisos: `publicarAviso(ramoCodigo, titulo, texto)`, la query `material(tutorId, ramoCodigo)` (solo lo visible para el usuario del token) y `eliminarMaterial(id)`. El mock recibe `SESIONES_PORT` y `USUARIOS_PORT` (exportados por sus módulos) y aplica las reglas del contrato: para publicar, el tutor necesita el ramo activo; un alumno ve el material de un tutor en un ramo si tiene o tuvo una sesión no cancelada con él en ese ramo; lo que no puede ver responde `NOT_FOUND`; solo el dueño elimina (`FORBIDDEN`).
+- Aún no hay evaluaciones, archivos por REST ni módulo del Agente.
 
 ### Aviso para el frontend (leer antes de manejar errores)
 
@@ -130,7 +131,7 @@ Cuando un compañero empiece el frontend, recordarle esto:
 
 - Para distinguir errores, usar **`extensions.code`**: `BAD_REQUEST` (datos inválidos, horario que no es un bloque, reservarse a sí mismo), `UNAUTHENTICATED` (sin usuario), `FORBIDDEN` (no participa, casilla ajena, solo el tutor confirma y solo el tutor finaliza), `NOT_FOUND`, `CONFLICT` (casilla ocupada o solapada, cruce de horario, transición de estado inválida, desmarcar con sesión activa) y `SERVICE_UNAVAILABLE` (servicio caído). Lo traduce `formatError` en `app.module.ts`.
 - El `stacktrace` que aparece en las respuestas es solo de desarrollo; en Kubernetes se oculta con `NODE_ENV=production`.
-- Las mutations de sesiones (`crearSesion`, `marcarCasilla`, `desmarcarCasilla`, `confirmarSesion`, `cancelarSesion`, `finalizarSesion`) y las de usuarios (`agregarRamosTutor`, `quitarRamoTutor`, `reactivarRamoTutor`), además de la query `yo`, requieren la cabecera `Authorization: Bearer <token>`, con el token que devuelven `registro` y `login`. Sin ella, o con un token vencido o inválido, responden `UNAUTHENTICATED`. El token dura 24 horas; al vencer, hay que volver a iniciar sesión.
+- Las mutations de sesiones (`crearSesion`, `marcarCasilla`, `desmarcarCasilla`, `confirmarSesion`, `cancelarSesion`, `finalizarSesion`) las de usuarios (`agregarRamosTutor`, `quitarRamoTutor`, `reactivarRamoTutor`) y las de material (`publicarAviso`, `eliminarMaterial`), además de las queries `yo` y `material`, requieren la cabecera `Authorization: Bearer <token>`, con el token que devuelven `registro` y `login`. Sin ella, o con un token vencido o inválido, responden `UNAUTHENTICATED`. El token dura 24 horas; al vencer, hay que volver a iniciar sesión.
 
 ## Contratos
 
@@ -194,9 +195,9 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
    3. ✅ Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio. Probado contra el mock (2026-11-17); falta probar un token emitido por el servidor real de Pablo.
    4. ✅ Sesiones según `propuestas/sesiones.md` (casillas, búsqueda, filtros, mock con las mismas reglas; `crearSesion` solo pide `inicio` y el BFF calcula el fin), probado de punta a punta contra Sesiones real (2026-11-16, 25 casos).
    5. Módulo `material/` (puerto + mock + gRPC), según `propuestas/material.md`:
-      - GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y el promedio y la cantidad de evaluaciones en los tutores del buscador, resueltos en lote con `ObtenerResumenTutores`.
+      - ✅ Avisos por GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, y cliente gRPC con límite de mensaje de 11 MB. Probado contra el mock (2026-11-20); el servicio de Ien todavía no implementa sus RPC.
+      - GraphQL de evaluaciones: `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y el promedio y la cantidad de evaluaciones en los tutores del buscador, resueltos en lote con `ObtenerResumenTutores`.
       - REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`.
-      - Cliente gRPC con límite de mensaje de 11 MB.
    6. Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), cuando Pablo defina su contrato.
 4. Tests de ambos hasta coverage ≥ 60%.
 5. Dockerfile y pipeline de cada repo (checkout con `submodules: true` y `contracts/proto/` copiado en la imagen).

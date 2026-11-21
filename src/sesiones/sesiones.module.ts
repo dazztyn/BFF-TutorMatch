@@ -16,5 +16,7 @@ import { SesionesResolver } from './sesiones.resolver';
       },
     },
   ],
+  // Material lo usa para saber qué sesiones tuvo un alumno con un tutor.
+  exports: [SESIONES_PORT],
 })
 export class SesionesModule {}

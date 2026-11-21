@@ -17,5 +17,7 @@ import { SesionUsuariosResolver, UsuariosResolver } from './usuarios.resolver';
       },
     },
   ],
+  // Material lo usa para validar que el tutor tiene el ramo activo.
+  exports: [USUARIOS_PORT],
 })
 export class UsuariosModule {}

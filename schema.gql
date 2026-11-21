@@ -9,6 +9,17 @@ type Acceso {
   usuario: Usuario!
 }
 
+"""Datos de un archivo guardado, sin los bytes"""
+type Archivo {
+  nombre: String!
+  tamanoBytes: Int!
+
+  """
+  "application/pdf", "image/png" o "image/jpeg"
+  """
+  tipoMime: String!
+}
+
 """
 Casilla de disponibilidad: un bloque de clase de 90 minutos para un ramo
 """
@@ -59,6 +70,22 @@ input LoginInput {
   password: String!
 }
 
+type Material {
+  """Solo en ARCHIVO; se descarga con GET /archivos/:id"""
+  archivo: Archivo
+  creadoEn: DateTime!
+  id: ID!
+  ramoCodigo: String!
+
+  """Solo en AVISO"""
+  texto: String
+  tipo: TipoMaterial!
+  titulo: String!
+
+  """Dueño del material"""
+  tutorId: ID!
+}
+
 type Mutation {
   """Formulario de inscripción como tutor; todo o nada si un ramo falla"""
   agregarRamosTutor(ramos: [InscripcionRamoInput!]!): Usuario!
@@ -66,6 +93,9 @@ type Mutation {
   confirmarSesion(id: ID!): Sesion!
   crearSesion(input: CrearSesionInput!): Sesion!
   desmarcarCasilla(id: ID!): Boolean!
+
+  """Solo el dueño"""
+  eliminarMaterial(id: ID!): Boolean!
   finalizarSesion(id: ID!): Sesion!
   login(input: LoginInput!): Acceso!
   marcarCasilla(
@@ -73,6 +103,7 @@ type Mutation {
     inicio: DateTime!
     ramoCodigo: String!
   ): BloqueDisponibilidad!
+  publicarAviso(ramoCodigo: String!, texto: String!, titulo: String!): Material!
 
   """Deja de impartir un ramo; se puede reactivar"""
   quitarRamoTutor(ramoCodigo: String!): Usuario!
@@ -90,6 +121,11 @@ type Query {
 
   """Casillas de un tutor que empiezan en [desde, hasta)"""
   disponibilidad(desde: DateTime!, hasta: DateTime!, tutorId: ID!): [BloqueDisponibilidad!]!
+
+  """
+  Material visible para el usuario actual, del más nuevo al más antiguo; filtros opcionales
+  """
+  material(ramoCodigo: String, tutorId: ID): [Material!]!
 
   """Catálogo de ramos"""
   ramos: [Ramo!]!
@@ -141,6 +177,11 @@ type Sesion {
   """null si el usuario ya no existe"""
   tutor: Usuario
   tutorId: ID!
+}
+
+enum TipoMaterial {
+  ARCHIVO
+  AVISO
 }
 
 type Usuario {

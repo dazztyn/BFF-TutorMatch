@@ -1,5 +1,5 @@
 import type { OnModuleDestroy } from '@nestjs/common';
-import { ClienteGrpc } from '../grpc';
+import { aDate, aTimestamp, ClienteGrpc, type Timestamp } from '../grpc';
 import type {
   BloqueDisponibilidad,
   EstadoSesion,
@@ -11,12 +11,6 @@ import type {
   SesionesPort,
 } from './sesiones.port';
 
-// google.protobuf.Timestamp tal como lo entrega proto-loader (longs: String).
-interface Timestamp {
-  seconds: string | number;
-  nanos: number;
-}
-
 interface SesionProto {
   id: string;
   tutorId: string;
@@ -27,15 +21,6 @@ interface SesionProto {
   estado: EstadoSesion;
   creadaEn: Timestamp;
 }
-
-export const aDate = (t: Timestamp): Date =>
-  new Date(Number(t.seconds) * 1000 + Math.floor(t.nanos / 1e6));
-
-export const aTimestamp = (d: Date): Timestamp => {
-  const ms = d.getTime();
-  const seconds = Math.floor(ms / 1000);
-  return { seconds, nanos: (ms - seconds * 1000) * 1e6 };
-};
 
 const aSesion = (s: SesionProto): Sesion => ({
   id: s.id,
