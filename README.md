@@ -1,114 +1,325 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# BFF-TutorMatch
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend for Frontend de **TutorMatch**, la plataforma donde los estudiantes reservan tutorías con otros estudiantes que aprobaron el ramo. Es la única puerta de entrada del front: recibe GraphQL (y REST para los archivos), verifica el token y reparte cada operación al microservicio que corresponde.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
-
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+```
+Front ──GraphQL──▶ BFF (NestJS) ──gRPC──▶ Sesiones  (Spring Boot)
+      ──REST────▶  /archivos    ──gRPC──▶ Usuarios  (Go)
+                                ──gRPC──▶ Material  (NestJS)
+                                ──REST──▶ Agente    (pendiente)
 ```
 
-## Compile and run the project
+## Cómo está hecho
+
+Cada servicio tiene su módulo en `src/` con el mismo patrón **puerto/adaptador**:
+
+| Módulo | Qué hace | Variable que elige el adaptador real |
+|---|---|---|
+| `src/sesiones/` | Casillas de disponibilidad, reservas y su ciclo de vida | `SESIONES_GRPC_URL` |
+| `src/usuarios/` | Registro, login, ramos e inscripción como tutor | `USUARIOS_GRPC_URL` |
+| `src/material/` | Avisos, archivos y evaluaciones | `MATERIAL_GRPC_URL` |
+
+- Si la variable existe, el BFF llama al servicio real por gRPC.
+- Si no, usa un **mock en memoria** que aplica las mismas reglas que el servicio. Sirve para trabajar en el front sin levantar nada más, pero **los datos se borran cada vez que el BFF se reinicia**.
+- Los `.proto` vienen del submódulo `contracts/` (repo `Contratos-TutorMatch`).
+- El esquema GraphQL se genera desde el código y queda en [`schema.gql`](schema.gql): ahí están todas las queries, mutaciones y tipos.
+
+## Requisitos
+
+- **Node 24.9 o superior** (hay un `.nvmrc`).
+- **El submódulo `contracts/`**. Sin él, el BFF no encuentra los `.proto` y los adaptadores gRPC no arrancan.
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+git clone --recurse-submodules https://github.com/dazztyn/BFF-TutorMatch.git
 ```
 
-## Run tests
+Si ya lo clonaste sin el submódulo:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+git submodule update --init
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Luego instala las dependencias:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm install
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Variables de entorno
 
-## Observability
+| Variable | Para qué | Si no está |
+|---|---|---|
+| `SESIONES_GRPC_URL` | Dirección de Sesiones, ej. `localhost:9090` | Mock de Sesiones |
+| `USUARIOS_GRPC_URL` | Dirección de Usuarios, ej. `localhost:50051` | Mock de Usuarios |
+| `MATERIAL_GRPC_URL` | Dirección de Material, ej. `localhost:9091` | Mock de Material |
+| `JWT_SECRET` | Secreto con que Usuarios firma los tokens; el BFF verifica con el mismo | En desarrollo, un secreto fijo. **En producción el BFF no arranca** |
+| `NODE_ENV` | `production` en Kubernetes: exige `JWT_SECRET` y oculta el `stacktrace` de los errores | Modo desarrollo |
+| `PORT` | Puerto HTTP del BFF | `3000` |
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+En Kubernetes, las direcciones son `sesiones:9090`, `usuarios:9090` y `material:9090`.
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+## Levantarlo
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+`npm run start:dev` levanta el BFF en `http://localhost:3000` y lo reinicia con cada cambio de archivo.
 
-## Resources
+PowerShell 5.1 no acepta `&&` ni `VAR=valor comando`: las variables se definen con `$env:` y los comandos se separan con `;`. Las variables quedan definidas hasta que cierras esa ventana de PowerShell.
 
-Check out a few resources that may come in handy when working with NestJS:
+### 1. Solo con mocks
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+No necesita nada más que el BFF.
 
-## Support
+```bash
+npm run start:dev
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+### 2. Con Sesiones real
 
-## Stay in touch
+Levanta Sesiones según su README (repo `Sesiones-TutorMatch`); su gRPC queda en el puerto 9090.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Git Bash:
 
-## License
+```bash
+SESIONES_GRPC_URL=localhost:9090 npm run start:dev
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+PowerShell:
+
+```powershell
+$env:SESIONES_GRPC_URL="localhost:9090"; npm run start:dev
+```
+
+### 3. Con Usuarios real (servicio de Pablo)
+
+1. Levanta Usuarios según su README (repo `pablofgx-code/tutormatch-usuarios`). Si no tienes Go, usa su `Dockerfile`. Si el puerto 5432 está ocupado, publica su Postgres en otro puerto (por ejemplo, 55433). Su gRPC escucha por defecto en el 50051.
+2. Usa en el BFF **el mismo `JWT_SECRET`** que en Usuarios. Si no coinciden, los tokens que emite Usuarios no pasan la verificación del BFF y todas las operaciones con token responden `UNAUTHENTICATED`.
+
+Git Bash:
+
+```bash
+USUARIOS_GRPC_URL=localhost:50051 SESIONES_GRPC_URL=localhost:9090 JWT_SECRET=el-mismo-de-usuarios npm run start:dev
+```
+
+PowerShell:
+
+```powershell
+$env:USUARIOS_GRPC_URL="localhost:50051"; $env:SESIONES_GRPC_URL="localhost:9090"; $env:JWT_SECRET="el-mismo-de-usuarios"; npm run start:dev
+```
+
+Para que Sesiones también valide los ramos contra Usuarios real, levántalo con su propio `USUARIOS_GRPC_URL` apuntando al mismo servidor.
+
+## Probar con GraphiQL
+
+Abre `http://localhost:3000/graphql` en el navegador.
+
+- **Sin token:** `registro`, `login`, `ramos`, `tutoresPorRamo`, `disponibilidad`, `buscarDisponibilidad`, `sesiones` y `sesion`.
+- **Con token:** todo lo demás. Copia el `token` que devuelven `registro` o `login` y pégalo en la pestaña **Headers**, abajo:
+
+```json
+{ "Authorization": "Bearer eyJhbGciOiJIUzI1NiIs..." }
+```
+
+El token dura 24 horas.
+
+### Bloques horarios
+
+Las casillas de disponibilidad son los bloques de clase de la universidad: 90 minutos, **de lunes a viernes**, en hora de Chile.
+
+| Bloque | A | B | C | D | E | F |
+|---|---|---|---|---|---|---|
+| Inicio (Chile) | 08:10 | 09:55 | 11:40 | 14:30 | 16:15 | 18:00 |
+
+El BFF recibe y devuelve las fechas en **UTC**. Para convertir, suma 3 horas en horario de verano (septiembre a abril) y 4 en horario de invierno. Ejemplo: el bloque D del lunes 23 de noviembre de 2026 (14:30 en Chile) es `"2026-11-23T17:30:00Z"`.
+
+Solo se aceptan casillas futuras: si la fecha del ejemplo ya pasó, usa la de un lunes próximo.
+
+### Recorrido de ejemplo
+
+**1. La tutora se registra.** Guarda el `token` y el `id`.
+
+```graphql
+mutation {
+  registro(input: { nombre: "Ana Tutora", email: "ana@uc.cl", password: "secreta123" }) {
+    token
+    usuario { id esTutor }
+  }
+}
+```
+
+**2. Se inscribe como tutora de un ramo** (con su token en Headers). Los códigos salen de la query `ramos`.
+
+```graphql
+mutation {
+  agregarRamosTutor(ramos: [{ ramoCodigo: "MAT1610", notaAprobacion: 6.5, periodoAprobacion: "2025-2" }]) {
+    esTutor
+    ramos { ramo { codigo nombre } activo }
+  }
+}
+```
+
+**3. Marca una casilla** (bloque D del lunes).
+
+```graphql
+mutation {
+  marcarCasilla(ramoCodigo: "MAT1610", inicio: "2026-11-23T17:30:00Z") {
+    id inicio fin libre
+  }
+}
+```
+
+**4. El alumno se registra** y su `token` pasa a la pestaña Headers.
+
+```graphql
+mutation {
+  registro(input: { nombre: "Beto Alumno", email: "beto@uc.cl", password: "secreta123" }) {
+    token
+    usuario { id }
+  }
+}
+```
+
+**5. Reserva la casilla.** Solo se envía el `inicio`: el BFF calcula el fin (90 minutos). Usa el `id` de la tutora del paso 1.
+
+```graphql
+mutation {
+  crearSesion(input: { tutorId: "ID_DE_LA_TUTORA", ramoCodigo: "MAT1610", inicio: "2026-11-23T17:30:00Z" }) {
+    id estado inicio fin
+    tutor { nombre }
+  }
+}
+```
+
+**6. La semana de la tutora**, con casillas y reservas en una sola consulta:
+
+```graphql
+{
+  disponibilidad(tutorId: "ID_DE_LA_TUTORA", desde: "2026-11-23T00:00:00Z", hasta: "2026-11-28T00:00:00Z") {
+    id ramoCodigo inicio libre
+  }
+  sesiones(tutorId: "ID_DE_LA_TUTORA", desde: "2026-11-23T00:00:00Z", hasta: "2026-11-28T00:00:00Z") {
+    id estado inicio
+    estudiante { nombre }
+  }
+}
+```
+
+Para avisar de reservas nuevas, el front repite `sesiones(tutorId: ..., estado: PENDIENTE)` cada 30 a 60 segundos (`pollInterval` de Apollo Client).
+
+**7. La tutora inicia sesión y confirma.** El token de `login` va a Headers.
+
+```graphql
+mutation {
+  login(input: { email: "ana@uc.cl", password: "secreta123" }) { token }
+}
+```
+
+```graphql
+mutation {
+  confirmarSesion(id: "ID_DE_LA_SESION") { estado }
+}
+```
+
+Las sesiones confirmadas pasan solas a `FINALIZADA` cuando termina el bloque (una tarea programada de Sesiones). La tutora también puede adelantarlo con `finalizarSesion`. Cualquiera de los dos puede cancelar con `cancelarSesion`.
+
+## Material y evaluaciones
+
+**Avisos.** Solo puede publicar quien tenga el ramo activo como tutor. La query `material` devuelve solo lo que el usuario del token puede ver: lo suyo, o el material de un tutor en un ramo si tiene o tuvo una sesión no cancelada con él en ese ramo.
+
+```graphql
+mutation {
+  publicarAviso(ramoCodigo: "MAT1610", titulo: "Para el lunes", texto: "Traigan calculadora") { id }
+}
+```
+
+```graphql
+{
+  material(ramoCodigo: "MAT1610") {
+    id tipo titulo texto creadoEn
+    archivo { nombre tipoMime tamanoBytes }
+  }
+}
+```
+
+**Evaluaciones.** El alumno evalúa una sesión `FINALIZADA` en la que participó, una sola vez, con una nota de 1 a 5. Las evaluaciones son anónimas: `evaluacionesTutor` no devuelve quién la escribió ni de qué sesión es.
+
+```graphql
+mutation {
+  evaluar(sesionId: "ID_DE_LA_SESION", nota: 5, comentario: "Explica muy bien") { nota }
+}
+```
+
+```graphql
+{
+  evaluacionesTutor(tutorId: "ID_DE_LA_TUTORA") {
+    promedio cantidad
+    evaluaciones { ramoCodigo nota comentario creadaEn }
+  }
+}
+```
+
+El promedio también está en cada `Usuario` (`promedioEvaluaciones` y `cantidadEvaluaciones`), por ejemplo en `tutoresPorRamo`.
+
+**Archivos (REST, no GraphQL).** Solo PDF, PNG o JPEG, de hasta 10 MB. El BFF revisa además los primeros bytes: un `.exe` renombrado a `.pdf` se rechaza.
+
+Subir (multipart con `archivo`, `ramoCodigo` y `titulo`); responde el `Material` creado:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" -F "archivo=@guia.pdf;type=application/pdf" -F ramoCodigo=MAT1610 -F titulo="Guia de integrales" http://localhost:3000/archivos
+```
+
+Descargar, con el `id` del material:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" -o guia.pdf http://localhost:3000/archivos/ID_DEL_MATERIAL
+```
+
+En PowerShell 5.1, `curl` es un alias de otro comando: escribe `curl.exe` y reemplaza `$TOKEN` por el token. Los títulos con tildes pueden llegar mal desde la consola de Windows; desde el front (UTF-8) llegan bien.
+
+## Errores
+
+En GraphQL, el tipo de error está en `errors[0].extensions.code`:
+
+| `extensions.code` | Cuándo |
+|---|---|
+| `BAD_REQUEST` | Datos inválidos: horario que no es un bloque o ya pasó, reservarse a sí mismo, nota fuera de 1 a 5 |
+| `UNAUTHENTICATED` | Sin token, token vencido o inválido, o email y contraseña incorrectos |
+| `FORBIDDEN` | No participa en la sesión, la casilla o el material no es suyo, solo el tutor confirma o finaliza, publicar material sin tener el ramo activo |
+| `NOT_FOUND` | No existe, o no tiene permiso para verlo |
+| `CONFLICT` | Casilla ocupada o solapada, cruce de horario, marcar o reservar en un ramo que el tutor no tiene activo, transición de estado inválida, email repetido, sesión ya evaluada |
+| `SERVICE_UNAVAILABLE` | Un servicio no responde |
+
+`/archivos` usa códigos HTTP, con el cuerpo `{ statusCode, message, error }`:
+
+| Código | Cuándo |
+|---|---|
+| 400 | Falta un campo, el archivo no es PDF, PNG ni JPEG de verdad, o se pidió descargar un aviso |
+| 401 | Sin token o token inválido |
+| 403 | No tiene ese ramo activo como tutor |
+| 404 | El material no existe o no puede verlo |
+| 413 | Más de 10 MB |
+| 503 | Material no responde |
+
+## Tests y calidad
+
+```bash
+npm run lint
+```
+
+```bash
+npm test
+```
+
+```bash
+npm run test:e2e
+```
+
+```bash
+npm run test:cov
+```
+
+## Problemas conocidos
+
+- **Los mocks se borran al reiniciar**, y `start:dev` reinicia el BFF con cada cambio de archivo. Para una demo sin cambios de código, usa `npm run build` y luego `npm run start:prod`.
+- **Puerto 5432 ocupado:** si otro proyecto ya usa el 5432, publica el Postgres de cada servicio en otro puerto (Sesiones usa el 55432 y Usuarios, por ejemplo, el 55433).
+- **El token dura 24 horas.** Al vencer, todas las operaciones con token dan `UNAUTHENTICATED`; hay que volver a hacer `login`.
+- **`JWT_SECRET` distinto entre Usuarios y el BFF:** todas las operaciones con token dan `UNAUTHENTICATED`, aunque el login funcione.
+- **Algunas queries no piden token** (`sesiones`, `disponibilidad`, `tutoresPorRamo`, entre otras), así que cualquiera puede leer esos datos.

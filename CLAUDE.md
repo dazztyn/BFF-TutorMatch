@@ -165,7 +165,29 @@ Decisiones de los contratos que afectan al BFF:
 Pendientes del lado de los contratos:
 
 - El contrato del agente sigue en borrador; Pablo todavía no lo define.
+- Coordinar con Pablo (Usuarios), para Kubernetes:
+  - El mismo Secret `JWT_SECRET` para Usuarios y el BFF; el valor por defecto de su servicio es solo de desarrollo.
+  - El puerto: su servidor escucha en el 50051 y lo acordado es `usuarios:9090`; se resuelve con `PORT=9090` en su manifiesto.
 - Coordinar con Pablo (Usuarios): los datos personales que pida el formulario de registro (hoy `Usuario` solo tiene nombre y email) y quién carga el catálogo de ramos.
+
+### Prueba de integración con Usuarios (2026-11-21)
+
+A mano, con GraphiQL, contra los servicios reales:
+
+- **BFF** con `SESIONES_GRPC_URL=localhost:9090`, `USUARIOS_GRPC_URL=localhost:50051` y `JWT_SECRET=dev-secret-cambiar-en-produccion`.
+- **Usuarios** de Pablo (`pablofgx-code/tutormatch-usuarios`, `main` en `ac11d53`, contratos en `2fa0949`), en Docker desde su `Dockerfile` (no hay Go en el equipo), con su Postgres en el 55433 y el gRPC en el 50051.
+- **Sesiones** con `USUARIOS_GRPC_URL` hacia el servidor de Pablo y su Postgres en el 55432.
+
+Funcionó todo el flujo:
+
+- El catálogo de ramos real (en el de Pablo, `MAT1610` es "Cálculo I").
+- Registro y login: los tokens firmados por Pablo pasan la verificación del BFF si `JWT_SECRET` coincide.
+- Inscribir, quitar y reactivar ramos.
+- Marcar casillas, incluido el rechazo de un ramo que la tutora no tiene (`CONFLICT`).
+- Reservar, con los nombres traídos por `ObtenerUsuarios`.
+- Confirmar.
+
+Material sigue probado solo contra el mock.
 
 ## Convenciones
 
@@ -196,16 +218,16 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12). ✅ Casillas por bloques según el contrato acordado (PR 5): migración V3, `MarcarCasilla`, `DesmarcarCasilla`, `ObtenerDisponibilidad` por rango, `BuscarDisponibilidad`, filtros de `ListarSesiones`, validaciones al crear y desmarcar, tarea programada de fin y vencimiento, `VerificarParticipacion` con `tutor_id` y `ramo_codigo`, y solo el tutor confirma y finaliza. Probado de punta a punta desde el BFF (2026-11-16). Pendiente:
    1. Adaptador gRPC real de `Usuarios.ValidarTutorRamo` (hoy usa un mock que siempre acepta), ya desbloqueado porque `usuarios.proto` está en `contracts/proto`.
    2. Luego tests, Docker y CI.
-3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es probar Usuarios y Material contra los servicios reales, y el módulo del agente cuando exista su contrato):
+3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es probar Material contra el servicio de Ien, y el módulo del agente cuando exista su contrato):
    1. ✅ `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
-   2. ✅ Módulo `usuarios/` (puerto + mock + gRPC), según el contrato acordado: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`. Probado contra el mock (2026-11-17); falta probarlo contra el servidor real de Pablo.
-   3. ✅ Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio. Probado contra el mock (2026-11-17); falta probar un token emitido por el servidor real de Pablo.
+   2. ✅ Módulo `usuarios/` (puerto + mock + gRPC), según el contrato acordado: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`. Probado contra el mock (2026-11-17) y contra el servidor real de Pablo (2026-11-21, ver "Prueba de integración con Usuarios").
+   3. ✅ Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio. Probado contra el mock (2026-11-17) y con tokens emitidos por el servidor real de Pablo (2026-11-21).
    4. ✅ Sesiones según `propuestas/sesiones.md` (casillas, búsqueda, filtros, mock con las mismas reglas; `crearSesion` solo pide `inicio` y el BFF calcula el fin), probado de punta a punta contra Sesiones real (2026-11-16, 25 casos).
    5. Módulo `material/` (puerto + mock + gRPC), según `propuestas/material.md`:
       - ✅ Avisos por GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, y cliente gRPC con límite de mensaje de 11 MB. Probado contra el mock (2026-11-20); el servicio de Ien todavía no implementa sus RPC.
       - ✅ GraphQL de evaluaciones: `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y `promedioEvaluaciones` y `cantidadEvaluaciones` en `Usuario`, resueltos en lote con `ObtenerResumenTutores`. Probado contra el mock (2026-11-21). Ojo: `tutoresPorRamo` no exige token, así que el promedio se puede ver sin sesión iniciada.
       - ✅ REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG, validando los primeros bytes) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`. Probado contra el mock (2026-11-21).
-      - Pendiente: probar todo el módulo contra el servicio de Ien cuando implemente sus RPC.
+      - Pendiente: probar todo el módulo contra el servicio de Ien cuando implemente sus RPC (su último commit es del 2026-11-17 y todavía no los tiene).
    6. Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), cuando Pablo defina su contrato.
 4. Tests de ambos hasta coverage ≥ 60%.
 5. Dockerfile y pipeline de cada repo (checkout con `submodules: true` y `contracts/proto/` copiado en la imagen).
