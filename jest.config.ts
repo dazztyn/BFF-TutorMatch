@@ -22,7 +22,13 @@ const config: Config = {
     'src/**/*.(t|j)s',
     'libs/**/*.(t|j)s',
     'apps/**/*.(t|j)s',
+    // Solo arranca el servidor; lo prueban el e2e y el arranque de la imagen.
+    '!src/main.ts',
   ],
+  // El curso exige 60% y el pipeline debe fallar bajo ese umbral.
+  coverageThreshold: {
+    global: { lines: 60, statements: 60, branches: 60, functions: 60 },
+  },
   coverageDirectory: './coverage',
   testEnvironment: 'node',
 };

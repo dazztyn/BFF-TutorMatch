@@ -60,7 +60,11 @@ export class UsuariosMock implements UsuariosPort {
   private readonly cuentas = new Map<string, Cuenta>();
 
   async registro({ nombre, email, password }: RegistroInput): Promise<Acceso> {
-    if (!nombre.trim() || !/^[^@\s]+@[^@\s]+$/.test(email) || !password) {
+    if (
+      !nombre.trim() ||
+      !/^[^@\s]+@[^@\s]+$/.test(email.trim()) ||
+      !password
+    ) {
       throw new BadRequestException(
         'Faltan el nombre o la contraseña, o el email no es válido',
       );

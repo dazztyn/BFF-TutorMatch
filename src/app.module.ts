@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
+import type { GraphQLFormattedError } from 'graphql';
 import { MaterialModule } from './material/material.module';
 import { SesionesModule } from './sesiones/sesiones.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
@@ -15,6 +16,17 @@ const CODIGOS: Record<number, string> = {
   503: 'SERVICE_UNAVAILABLE',
 };
 
+export const formatearError = (
+  error: GraphQLFormattedError,
+): GraphQLFormattedError => {
+  const original = error.extensions?.originalError as
+    { statusCode?: number } | undefined;
+  const codigo = CODIGOS[original?.statusCode ?? 0];
+  return codigo
+    ? { ...error, extensions: { ...error.extensions, code: codigo } }
+    : error;
+};
+
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
@@ -22,14 +34,7 @@ const CODIGOS: Record<number, string> = {
       // Code-first: el esquema se genera desde los modelos y se versiona en schema.gql.
       autoSchemaFile: 'schema.gql',
       sortSchema: true,
-      formatError: (error) => {
-        const original = error.extensions?.originalError as
-          { statusCode?: number } | undefined;
-        const codigo = CODIGOS[original?.statusCode ?? 0];
-        return codigo
-          ? { ...error, extensions: { ...error.extensions, code: codigo } }
-          : error;
-      },
+      formatError: formatearError,
     }),
     SesionesModule,
     UsuariosModule,
