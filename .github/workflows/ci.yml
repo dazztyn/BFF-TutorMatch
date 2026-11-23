@@ -1,0 +1,43 @@
+# CI del BFF: lint, tests con coverage mínimo de 60%, e2e y build de la imagen Docker.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Los adaptadores gRPC y sus tests leen los .proto del submódulo contracts/.
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Falla si alguna métrica queda bajo el umbral de 60% de jest.config.ts.
+      - name: Tests y coverage
+        run: npm run test:cov
+
+      - name: Informe de coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+      - name: Tests e2e
+        run: npm run test:e2e
+
+      # Solo comprueba que la imagen se construye; todavía no se publica en ningún registro.
+      - name: Imagen Docker
+        run: docker build -t bff:${{ github.sha }} .

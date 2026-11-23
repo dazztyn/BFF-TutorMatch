@@ -344,6 +344,10 @@ npm run test:e2e
 npm run test:cov
 ```
 
+`test:cov` falla si alguna métrica (líneas, sentencias, ramas o funciones) queda bajo 60%. Los adaptadores gRPC se prueban contra un servidor gRPC falso (`test/servidor-grpc-falso.ts`) que usa los `.proto` reales del submódulo.
+
+El CI (`.github/workflows/ci.yml`, GitHub Actions) corre en cada push y pull request: `npm ci`, lint, `test:cov`, `test:e2e` y `docker build`. La imagen no se publica todavía.
+
 ## Problemas conocidos
 
 - **Los mocks se borran al reiniciar**, y `start:dev` reinicia el BFF con cada cambio de archivo. Para una demo sin cambios de código, usa `npm run build` y luego `npm run start:prod`.
