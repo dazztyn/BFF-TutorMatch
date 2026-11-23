@@ -32,7 +32,9 @@ export const formatearError = (
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       // Code-first: el esquema se genera desde los modelos y se versiona en schema.gql.
-      autoSchemaFile: 'schema.gql',
+      // En producción queda en memoria: la imagen corre sin permisos de escritura y no lo necesita.
+      autoSchemaFile:
+        process.env.NODE_ENV === 'production' ? true : 'schema.gql',
       sortSchema: true,
       formatError: formatearError,
     }),

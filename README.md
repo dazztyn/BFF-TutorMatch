@@ -107,6 +107,34 @@ $env:USUARIOS_GRPC_URL="localhost:50051"; $env:SESIONES_GRPC_URL="localhost:9090
 
 Para que Sesiones también valide los ramos contra Usuarios real, levántalo con su propio `USUARIOS_GRPC_URL` apuntando al mismo servidor.
 
+### 4. Con Docker
+
+La imagen se construye desde la raíz del repo, con el submódulo `contracts/` descargado (los `.proto` van dentro de la imagen):
+
+```bash
+docker build -t bff .
+```
+
+La imagen corre con `NODE_ENV=production`, así que **exige `JWT_SECRET`** y no expone GraphiQL. Sin las variables `*_GRPC_URL` usa los mocks:
+
+```bash
+docker run --rm -p 3000:3000 -e JWT_SECRET=un-secreto bff
+```
+
+Para conectarla a servicios que corren en tu máquina, usa `host.docker.internal` en vez de `localhost`:
+
+```bash
+docker run --rm -p 3000:3000 -e JWT_SECRET=el-mismo-de-usuarios -e SESIONES_GRPC_URL=host.docker.internal:9090 -e USUARIOS_GRPC_URL=host.docker.internal:50051 bff
+```
+
+Para comprobar que responde:
+
+```bash
+curl -s http://localhost:3000/graphql -H "content-type: application/json" -d '{"query":"{ ramos { codigo } }"}'
+```
+
+En la imagen, el esquema GraphQL se arma en memoria: no se escribe `schema.gql`.
+
 ## Probar con GraphiQL
 
 Abre `http://localhost:3000/graphql` en el navegador.

@@ -1,0 +1,14 @@
+# Solo se envía al build lo que el Dockerfile copia. contracts/ sí se envía (sin su .git).
+node_modules/
+dist/
+coverage/
+test/
+.git
+contracts/.git
+.github/
+.idea/
+.vscode/
+*.log
+.env
+.env.*
+*.tsbuildinfo
