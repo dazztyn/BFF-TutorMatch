@@ -188,7 +188,42 @@ Funcionó todo el flujo:
 - Reservar, con los nombres traídos por `ObtenerUsuarios`.
 - Confirmar.
 
-Material sigue probado solo contra el mock.
+### Prueba de integración con Material (2026-11-24)
+
+A mano, con GraphiQL y curl, con todos los servicios reales salvo el agente:
+
+- **BFF** con `SESIONES_GRPC_URL=localhost:9090`, `USUARIOS_GRPC_URL=localhost:50051`, `MATERIAL_GRPC_URL=localhost:9095` y `JWT_SECRET=dev-secret-cambiar-en-produccion`.
+- **Material** de Ien (`IenZAVALA-S/tutormatch-material`, `main` en `a61d82d`, contratos en `2fa0949`), clonado en `Desktop	utormatch-material` y corrido con `node dist/main.js`:
+  - `GRPC_URL=0.0.0.0:9095` (el 9090 lo usa Sesiones);
+  - el Mongo de su `docker-compose`, en el 27018;
+  - `KAFKA_BROKERS=localhost:9092`: el Kafka de Sesiones, no el de su compose;
+  - Usuarios y Sesiones reales.
+- **Usuarios** de Pablo en Docker (50051) y **Sesiones** real (9090), igual que en la prueba del 2026-11-21.
+
+Funcionó todo:
+
+- `publicarAviso`: Material validó el ramo con `Usuarios.ValidarTutorRamo`.
+- `material(tutorId)`:
+  - el alumno con una sesión con la tutora ve el aviso, porque Material armó su copia de las sesiones desde los eventos Kafka de Sesiones;
+  - un usuario sin sesiones recibe una lista vacía.
+- `POST /archivos` con un PDF de 2,1 MB y `GET /archivos/:id` como alumno: el archivo descargado es idéntico.
+- La tarea programada de Sesiones pasó la sesión del 2026-11-23 a `FINALIZADA`.
+- `evaluar`: lo aceptó, porque Material validó con `Sesiones.VerificarParticipacion`; repetir la evaluación dio `CONFLICT` ("Esta sesión ya fue evaluada").
+- `evaluacionesTutor`: promedio 5, cantidad 1.
+- Con esto queda probado el ida y vuelta con dos protocolos que pide el curso: Sesiones → Material por Kafka y Material → Sesiones por gRPC.
+
+Observaciones para Ien:
+
+- Su repo todavía no tiene `.github/workflows` (CI).
+- Su `docker-compose` levanta un Kafka propio en el 9092, que choca con el de Sesiones.
+- kafkajs muestra un `TimeoutNegativeWarning` al arrancar, sin efecto.
+- Material rechaza ids que no son UUID (`INVALID_ARGUMENT`). Las sesiones viejas de pruebas manuales, con ids como `tut-e2e-278`, podrían provocar ese error en las consultas de promedios.
+
+Si Docker Desktop se reinicia, los contenedores de prueba quedan apagados. Para levantarlos en orden (PowerShell):
+
+```powershell
+docker start usuarios-pg-prueba sesiones-pg material-mongo sesionesarq2-kafka-1; Start-Sleep 6; docker start usuarios-grpc-prueba
+```
 
 ## Convenciones
 
@@ -217,16 +252,16 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). ✅ Bloques horarios acordados en `propuestas/sesiones.md` (2026-11-16). ✅ Contratos de Sesiones, Usuarios y Material acordados en `proto/` (`2fa0949`), con tutorías solo de lunes a viernes (2026-11-17). Pendiente: definir el contrato del agente.
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12). ✅ Casillas por bloques según el contrato acordado (PR 5): migración V3, `MarcarCasilla`, `DesmarcarCasilla`, `ObtenerDisponibilidad` por rango, `BuscarDisponibilidad`, filtros de `ListarSesiones`, validaciones al crear y desmarcar, tarea programada de fin y vencimiento, `VerificarParticipacion` con `tutor_id` y `ramo_codigo`, y solo el tutor confirma y finaliza. Probado de punta a punta desde el BFF (2026-11-16). ✅ Adaptador gRPC real de `Usuarios.ValidarTutorRamo`, probado contra el servidor de Pablo (2026-11-21). ✅ Tests con JaCoCo ≥ 60%, Dockerfile y CI (PR mergeados). Pendiente: Kubernetes.
-3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es probar Material contra el servicio de Ien, y el módulo del agente cuando exista su contrato):
+3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es el módulo del agente):
    1. ✅ `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
    2. ✅ Módulo `usuarios/` (puerto + mock + gRPC), según el contrato acordado: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`. Probado contra el mock (2026-11-17) y contra el servidor real de Pablo (2026-11-21, ver "Prueba de integración con Usuarios").
    3. ✅ Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio. Probado contra el mock (2026-11-17) y con tokens emitidos por el servidor real de Pablo (2026-11-21).
    4. ✅ Sesiones según `propuestas/sesiones.md` (casillas, búsqueda, filtros, mock con las mismas reglas; `crearSesion` solo pide `inicio` y el BFF calcula el fin), probado de punta a punta contra Sesiones real (2026-11-16, 25 casos).
    5. Módulo `material/` (puerto + mock + gRPC), según `propuestas/material.md`:
-      - ✅ Avisos por GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, y cliente gRPC con límite de mensaje de 11 MB. Probado contra el mock (2026-11-20); el servicio de Ien todavía no implementa sus RPC.
+      - ✅ Avisos por GraphQL: `publicarAviso`, `material`, `eliminarMaterial`, y cliente gRPC con límite de mensaje de 11 MB. Probado contra el mock (2026-11-20).
       - ✅ GraphQL de evaluaciones: `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y `promedioEvaluaciones` y `cantidadEvaluaciones` en `Usuario`, resueltos en lote con `ObtenerResumenTutores`. Probado contra el mock (2026-11-21). Ojo: `tutoresPorRamo` no exige token, así que el promedio se puede ver sin sesión iniciada.
       - ✅ REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG, validando los primeros bytes) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`. Probado contra el mock (2026-11-21).
-      - Pendiente: probar todo el módulo contra el servicio de Ien cuando implemente sus RPC (su último commit es del 2026-11-17 y todavía no los tiene).
+      - ✅ Probado todo el módulo contra el servicio real de Ien (2026-11-24, ver "Prueba de integración con Material").
    6. Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), cuando Pablo defina su contrato.
 4. Tests hasta coverage ≥ 60%: ✅ Sesiones (JaCoCo). ✅ BFF (2026-11-23): 71 tests unitarios con umbral de 60% en líneas, sentencias, ramas y funciones en `jest.config.ts` (solo se excluye `src/main.ts`); quedó en 87% de líneas, 88% de sentencias, 83% de ramas y 70% de funciones. Los adaptadores gRPC se prueban contra un servidor gRPC falso con los `.proto` reales (`test/servidor-grpc-falso.ts`).
 5. Dockerfile y pipeline: ✅ Sesiones. ✅ BFF (2026-11-23): `Dockerfile` multietapa (`node:24-alpine`, solo dependencias de producción, `dist/` y `contracts/proto/`, usuario `node`, `NODE_ENV=production`; en producción el esquema GraphQL se arma en memoria y no se escribe `schema.gql`) y `.github/workflows/ci.yml` (checkout con submódulo, lint, `test:cov` con umbral, `test:e2e` y `docker build`, sin publicar la imagen). Falta ver el primer run en GitHub.
