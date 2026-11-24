@@ -6,7 +6,7 @@ Backend for Frontend de **TutorMatch**, la plataforma donde los estudiantes rese
 Front ──GraphQL──▶ BFF (NestJS) ──gRPC──▶ Sesiones  (Spring Boot)
       ──REST────▶  /archivos    ──gRPC──▶ Usuarios  (Go)
                                 ──gRPC──▶ Material  (NestJS)
-                                ──REST──▶ Agente    (pendiente)
+                                ──REST──▶ Agente    (Go, con Gemini)
 ```
 
 ## Cómo está hecho
@@ -18,8 +18,9 @@ Cada servicio tiene su módulo en `src/` con el mismo patrón **puerto/adaptador
 | `src/sesiones/` | Casillas de disponibilidad, reservas y su ciclo de vida | `SESIONES_GRPC_URL` |
 | `src/usuarios/` | Registro, login, ramos e inscripción como tutor | `USUARIOS_GRPC_URL` |
 | `src/material/` | Avisos, archivos y evaluaciones | `MATERIAL_GRPC_URL` |
+| `src/agente/` | Chat con el agente de IA, por REST | `AGENTE_URL` |
 
-- Si la variable existe, el BFF llama al servicio real por gRPC.
+- Si la variable existe, el BFF llama al servicio real (por gRPC, o por REST en el caso del agente).
 - Si no, usa un **mock en memoria** que aplica las mismas reglas que el servicio. Sirve para trabajar en el front sin levantar nada más, pero **los datos se borran cada vez que el BFF se reinicia**.
 - Los `.proto` vienen del submódulo `contracts/` (repo `Contratos-TutorMatch`).
 - El esquema GraphQL se genera desde el código y queda en [`schema.gql`](schema.gql): ahí están todas las queries, mutaciones y tipos.
@@ -54,9 +55,11 @@ npm install
 | `MATERIAL_GRPC_URL` | Dirección de Material, ej. `localhost:9091` | Mock de Material |
 | `JWT_SECRET` | Secreto con que Usuarios firma los tokens; el BFF verifica con el mismo | En desarrollo, un secreto fijo. **En producción el BFF no arranca** |
 | `NODE_ENV` | `production` en Kubernetes: exige `JWT_SECRET` y oculta el `stacktrace` de los errores | Modo desarrollo |
+| `AGENTE_URL` | Dirección del agente, ej. `http://localhost:8081` | Mock del agente (responde un texto fijo) |
+| `AGENTE_TIMEOUT_MS` | Cuánto espera el BFF al agente, en milisegundos | `120000` (2 minutos) |
 | `PORT` | Puerto HTTP del BFF | `3000` |
 
-En Kubernetes, las direcciones son `sesiones:9090`, `usuarios:9090` y `material:9090`.
+En Kubernetes, las direcciones son `sesiones:9090`, `usuarios:9090`, `material:9090` y `http://agente:8081`.
 
 ## Levantarlo
 
@@ -302,6 +305,28 @@ curl -H "Authorization: Bearer $TOKEN" -o guia.pdf http://localhost:3000/archivo
 
 En PowerShell 5.1, `curl` es un alias de otro comando: escribe `curl.exe` y reemplaza `$TOKEN` por el token. Los títulos con tildes pueden llegar mal desde la consola de Windows; desde el front (UTF-8) llegan bien.
 
+## Agente
+
+El agente entiende pedidos como "Necesito ayuda con Cálculo II el jueves en la tarde": busca tutores, revisa su disponibilidad y puede crear la reserva. El BFF le reenvía la cabecera `Authorization` del usuario, porque el agente llama al BFF con ese mismo token (por ejemplo, a `crearSesion`).
+
+Con token:
+
+```graphql
+mutation {
+  chatAgente(mensaje: "Necesito ayuda con Cálculo II el jueves en la tarde") {
+    conversacionId
+    respuesta
+    acciones { tipo id }
+  }
+}
+```
+
+- Para seguir la misma conversación, manda el `conversacionId` que devolvió la respuesta anterior: `chatAgente(mensaje: "...", conversacionId: "...")`.
+- `acciones` viene vacía si el agente solo conversó, o trae `{ tipo: "sesion.creada", id }` cuando reservó: el front debería refrescar esa vista.
+- El mensaje va de 1 a 2000 caracteres, y el `conversacionId`, hasta 128. El BFF lo valida antes de llamar al agente.
+- **Puede tardar hasta unos 2 minutos**, porque el agente encadena varias llamadas a Gemini. Conviene mostrar que está pensando y no reintentar mientras tanto.
+- Sin `AGENTE_URL`, el mock responde siempre el mismo texto, sin acciones.
+
 ## Errores
 
 En GraphQL, el tipo de error está en `errors[0].extensions.code`:
@@ -313,7 +338,9 @@ En GraphQL, el tipo de error está en `errors[0].extensions.code`:
 | `FORBIDDEN` | No participa en la sesión, la casilla o el material no es suyo, solo el tutor confirma o finaliza, publicar material sin tener el ramo activo |
 | `NOT_FOUND` | No existe, o no tiene permiso para verlo |
 | `CONFLICT` | Casilla ocupada o solapada, cruce de horario, marcar o reservar en un ramo que el tutor no tiene activo, transición de estado inválida, email repetido, sesión ya evaluada |
-| `SERVICE_UNAVAILABLE` | Un servicio no responde |
+| `TOO_MANY_REQUESTS` | El agente recibió demasiados mensajes de ese usuario; reintentar en unos segundos |
+| `SERVICE_UNAVAILABLE` | Un servicio no responde, o el agente o Gemini no responden a tiempo |
+| `GATEWAY_TIMEOUT` | El agente superó su máximo de pasos sin terminar |
 
 `/archivos` usa códigos HTTP, con el cuerpo `{ statusCode, message, error }`:
 
