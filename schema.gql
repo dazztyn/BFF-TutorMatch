@@ -9,6 +9,16 @@ type Acceso {
   usuario: Usuario!
 }
 
+"""Algo que el agente hizo en el sistema, para refrescar esa vista"""
+type AccionAgente {
+  id: ID!
+
+  """
+  Por ahora solo "sesion.creada"
+  """
+  tipo: String!
+}
+
 """Datos de un archivo guardado, sin los bytes"""
 type Archivo {
   nombre: String!
@@ -123,6 +133,17 @@ type Mutation {
   """Formulario de inscripción como tutor; todo o nada si un ramo falla"""
   agregarRamosTutor(ramos: [InscripcionRamoInput!]!): Usuario!
   cancelarSesion(id: ID!): Sesion!
+
+  """
+  Conversa con el agente; puede tardar hasta unos 2 minutos si busca y reserva
+  """
+  chatAgente(
+    """El que devolvió la respuesta anterior, para seguir la conversación"""
+    conversacionId: String
+
+    """De 1 a 2000 caracteres"""
+    mensaje: String!
+  ): RespuestaAgente!
   confirmarSesion(id: ID!): Sesion!
   crearSesion(input: CrearSesionInput!): Sesion!
   desmarcarCasilla(id: ID!): Boolean!
@@ -209,6 +230,15 @@ input RegistroInput {
   email: String!
   nombre: String!
   password: String!
+}
+
+type RespuestaAgente {
+  """Vacía si el agente solo conversó"""
+  acciones: [AccionAgente!]!
+
+  """Se manda de vuelta para seguir la misma conversación"""
+  conversacionId: String!
+  respuesta: String!
 }
 
 type Sesion {

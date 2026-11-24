@@ -7,7 +7,9 @@ describe('formatearError', () => {
     [403, 'FORBIDDEN'],
     [404, 'NOT_FOUND'],
     [409, 'CONFLICT'],
+    [429, 'TOO_MANY_REQUESTS'],
     [503, 'SERVICE_UNAVAILABLE'],
+    [504, 'GATEWAY_TIMEOUT'],
   ])('traduce un %i a %s', (statusCode, code) => {
     const error = formatearError({
       message: 'x',

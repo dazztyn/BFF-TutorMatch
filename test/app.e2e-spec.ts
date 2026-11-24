@@ -106,6 +106,21 @@ describe('GraphQL del BFF (e2e)', () => {
     expect(body.data.yo).toEqual({ id, esTutor: false });
   });
 
+  it('conversa con el agente solo con token y valida el largo del mensaje', async () => {
+    const chat = (mensaje: string) =>
+      `mutation { chatAgente(mensaje: "${mensaje}") { conversacionId respuesta acciones { tipo id } } }`;
+
+    const { body: sinToken } = await gql(chat('hola'));
+    expect(sinToken.errors[0].extensions.code).toBe('UNAUTHENTICATED');
+
+    const { body: vacio } = await gql(chat(' '), 'est-1');
+    expect(vacio.errors[0].extensions.code).toBe('BAD_REQUEST');
+
+    const { body } = await gql(chat('Necesito ayuda con Cálculo II'), 'est-1');
+    expect(body.data.chatAgente.acciones).toEqual([]);
+    expect(body.data.chatAgente.conversacionId).toBeTruthy();
+  });
+
   afterEach(async () => {
     await app.close();
   });

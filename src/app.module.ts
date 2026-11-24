@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import type { GraphQLFormattedError } from 'graphql';
+import { AgenteModule } from './agente/agente.module';
 import { MaterialModule } from './material/material.module';
 import { SesionesModule } from './sesiones/sesiones.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
@@ -13,7 +14,9 @@ const CODIGOS: Record<number, string> = {
   403: 'FORBIDDEN',
   404: 'NOT_FOUND',
   409: 'CONFLICT',
+  429: 'TOO_MANY_REQUESTS',
   503: 'SERVICE_UNAVAILABLE',
+  504: 'GATEWAY_TIMEOUT',
 };
 
 export const formatearError = (
@@ -41,6 +44,7 @@ export const formatearError = (
     SesionesModule,
     UsuariosModule,
     MaterialModule,
+    AgenteModule,
   ],
 })
 export class AppModule {}
