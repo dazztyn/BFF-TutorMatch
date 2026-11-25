@@ -1,6 +1,14 @@
-import { EstadoSesion, type Sesion } from '../sesiones/sesiones.models';
+import {
+  type BloqueDisponibilidad,
+  EstadoSesion,
+  type Sesion,
+} from '../sesiones/sesiones.models';
 import { UsuariosMock } from './usuarios.mock';
-import { SesionUsuariosResolver, UsuariosResolver } from './usuarios.resolver';
+import {
+  BloqueUsuariosResolver,
+  SesionUsuariosResolver,
+  UsuariosResolver,
+} from './usuarios.resolver';
 
 describe('UsuariosResolver', () => {
   let mock: UsuariosMock;
@@ -74,6 +82,34 @@ describe('SesionUsuariosResolver', () => {
       'Beto',
       'Ana',
     ]);
+    expect(enLote).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BloqueUsuariosResolver', () => {
+  it('trae los tutores de varias casillas y sesiones en una sola llamada', async () => {
+    const mock = new UsuariosMock();
+    const ana = (
+      await mock.registro({ nombre: 'Ana', email: 'a@uc.cl', password: 'p' })
+    ).usuario;
+    const enLote = jest.spyOn(mock, 'obtenerUsuarios');
+    const casillas = new BloqueUsuariosResolver(mock);
+    const sesiones = new SesionUsuariosResolver(mock);
+    const ctx = {};
+    const bloque = (tutorId: string) => ({ tutorId }) as BloqueDisponibilidad;
+
+    const [primera, segunda, deSesion, inexistente] = await Promise.all([
+      casillas.tutor(bloque(ana.id), ctx),
+      casillas.tutor(bloque(ana.id), ctx),
+      sesiones.tutor({ tutorId: ana.id } as Sesion, ctx),
+      casillas.tutor(bloque('no-existe'), ctx),
+    ]);
+    expect([primera?.nombre, segunda?.nombre, deSesion?.nombre]).toEqual([
+      'Ana',
+      'Ana',
+      'Ana',
+    ]);
+    expect(inexistente).toBeNull();
     expect(enLote).toHaveBeenCalledTimes(1);
   });
 });

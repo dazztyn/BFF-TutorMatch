@@ -34,7 +34,7 @@ describe('GraphQL del BFF (e2e)', () => {
     }) { id estado estudianteId inicio }
   }`;
   const semana = `{
-    disponibilidad(tutorId: "tut-1", desde: "2030-12-02T00:00:00Z", hasta: "2030-12-07T00:00:00Z") { libre }
+    disponibilidad(tutorId: "tut-1", desde: "2030-12-02T00:00:00Z", hasta: "2030-12-07T00:00:00Z") { libre tutor { id } }
     sesiones(tutorId: "tut-1", estado: CONFIRMADA, desde: "2030-12-02T00:00:00Z", hasta: "2030-12-07T00:00:00Z") { id }
   }`;
 
@@ -68,7 +68,8 @@ describe('GraphQL del BFF (e2e)', () => {
     expect(confirmada.data.confirmarSesion.estado).toBe('CONFIRMADA');
 
     const { body } = await gql(semana);
-    expect(body.data.disponibilidad).toEqual([{ libre: false }]);
+    // tut-1 no está registrado en el mock de Usuarios: el tutor viene null.
+    expect(body.data.disponibilidad).toEqual([{ libre: false, tutor: null }]);
     expect(body.data.sesiones).toEqual([{ id }]);
   });
 
