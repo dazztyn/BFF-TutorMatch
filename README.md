@@ -159,7 +159,16 @@ Las casillas de disponibilidad son los bloques de clase de la universidad: 90 mi
 |---|---|---|---|---|---|---|
 | Inicio (Chile) | 08:10 | 09:55 | 11:40 | 14:30 | 16:15 | 18:00 |
 
-El BFF recibe y devuelve las fechas en **UTC**. Para convertir, suma 3 horas en horario de verano (septiembre a abril) y 4 en horario de invierno. Ejemplo: el bloque D del lunes 23 de noviembre de 2026 (14:30 en Chile) es `"2026-11-23T17:30:00Z"`.
+El BFF recibe y devuelve las fechas en **UTC**. La diferencia con Chile es de 3 o 4 horas según el horario de verano o de invierno, y las fechas del cambio varían de un año a otro, así que no sumes horas fijas: convierte con la zona `America/Santiago` usando una librería, por ejemplo [`date-fns-tz`](https://github.com/marnusw/date-fns-tz) (o `Temporal`, donde esté disponible). Ejemplo: el bloque D del lunes 23 de noviembre de 2026 (14:30 en Chile) es `"2026-11-23T17:30:00Z"`.
+
+```js
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+
+// Hora de Chile → UTC, para mandarla al BFF
+fromZonedTime('2026-11-23T14:30:00', 'America/Santiago').toISOString(); // "2026-11-23T17:30:00.000Z"
+// UTC → hora de Chile, para mostrarla
+formatInTimeZone('2026-11-23T17:30:00Z', 'America/Santiago', 'HH:mm'); // "14:30"
+```
 
 Solo se aceptan casillas futuras: si la fecha del ejemplo ya pasó, usa la de un lunes próximo.
 
@@ -305,6 +314,18 @@ curl -H "Authorization: Bearer $TOKEN" -o guia.pdf http://localhost:3000/archivo
 
 En PowerShell 5.1, `curl` es un alias de otro comando: escribe `curl.exe` y reemplaza `$TOKEN` por el token. Los títulos con tildes pueden llegar mal desde la consola de Windows; desde el front (UTF-8) llegan bien.
 
+**Desde el navegador**, la descarga también exige la cabecera `Authorization`. Un `<img src="/archivos/...">` o un `<a href="/archivos/...">` no mandan cabeceras y reciben 401: hay que bajar el archivo con `fetch` y mostrarlo desde un object URL.
+
+```js
+const res = await fetch(`/archivos/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+if (!res.ok) throw new Error(`Error ${res.status}`);
+const url = URL.createObjectURL(await res.blob());
+// <img src={url}> para una imagen, window.open(url) para un PDF,
+// o <a href={url} download={nombre}> para guardarlo. Al terminar: URL.revokeObjectURL(url).
+```
+
+Para subir, lo mismo con un `FormData` (`archivo`, `ramoCodigo` y `titulo`) y `method: 'POST'`, sin poner `Content-Type` a mano: el navegador lo arma con su `boundary`.
+
 ## Agente
 
 El agente entiende pedidos como "Necesito ayuda con Cálculo II el jueves en la tarde": busca tutores, revisa su disponibilidad y puede crear la reserva. El BFF le reenvía la cabecera `Authorization` del usuario, porque el agente llama al BFF con ese mismo token (por ejemplo, a `crearSesion`).
@@ -326,6 +347,60 @@ mutation {
 - El mensaje va de 1 a 2000 caracteres, y el `conversacionId`, hasta 128. El BFF lo valida antes de llamar al agente.
 - **Puede tardar hasta unos 2 minutos**, porque el agente encadena varias llamadas a Gemini. Conviene mostrar que está pensando y no reintentar mientras tanto.
 - Sin `AGENTE_URL`, el mock responde siempre el mismo texto, sin acciones.
+
+## Para el front (React + Apollo Client)
+
+**Token en cada operación.** Un link de Apollo agrega la cabecera; las queries sin token también funcionan con ella.
+
+```js
+import { ApolloClient, ApolloLink, HttpLink, InMemoryCache } from '@apollo/client';
+
+const auth = new ApolloLink((operation, forward) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    operation.setContext(({ headers }) => ({
+      headers: { ...headers, Authorization: `Bearer ${token}` },
+    }));
+  }
+  return forward(operation);
+});
+
+export const client = new ApolloClient({
+  link: auth.concat(new HttpLink({ uri: '/graphql' })),
+  cache: new InMemoryCache(),
+});
+```
+
+**Reservas pendientes del tutor.** Sin websockets: la pantalla principal repite la query cada 30 a 60 segundos con `pollInterval`.
+
+```js
+useQuery(PENDIENTES, { variables: { tutorId }, pollInterval: 45_000 });
+// PENDIENTES: query { sesiones(tutorId: $tutorId, estado: PENDIENTE) { id inicio ramoCodigo estudiante { nombre } } }
+```
+
+**Errores.** Distinguirlos por `extensions.code` del error GraphQL (ver [Errores](#errores)), no por el texto del mensaje. Con `UNAUTHENTICATED`, borrar el token y volver al login.
+
+**Agente.** `chatAgente` puede tardar hasta unos 2 minutos: mostrar que está pensando y no reintentar mientras tanto.
+
+**Proxy en desarrollo.** Con un proxy de Vite hacia el BFF, el navegador ve todo en el mismo origen (`http://localhost:5173`) y no hace falta CORS. El front usa rutas relativas (`/graphql`, `/archivos/...`) y no debe tener páginas propias con esos caminos.
+
+```js
+// vite.config.js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/graphql': 'http://localhost:3000',
+      '/archivos': 'http://localhost:3000',
+    },
+  },
+});
+```
+
+**El BFF no habilita CORS, a propósito.** En desarrollo se usa este proxy. En Kubernetes, el ingress publica el front y el BFF bajo el mismo dominio (`/` para el front, `/graphql` y `/archivos` para el BFF). Sin el proxy, el navegador bloquea las peticiones a `http://localhost:3000`.
 
 ## Errores
 

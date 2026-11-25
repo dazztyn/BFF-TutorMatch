@@ -31,12 +31,12 @@ Proyecto 2 del curso de Arquitectura de Sistemas. Plataforma donde estudiantes r
 
 | Componente | Tecnología | Base de datos | Responsable |
 |---|---|---|---|
-| Frontend | por definir | — | compañero |
+| Frontend | React + Apollo Client | — | Ien |
 | BFF / API Gateway | NestJS (GraphQL) | — | **yo** |
 | Usuarios | Go | PostgreSQL | Pablo |
 | Sesiones | Java + Spring Boot | PostgreSQL | **yo** |
 | Material y evaluaciones | NestJS | MongoDB (por confirmar) | Ien |
-| MCP server + agente | TypeScript (SDK oficial MCP) | — | Pablo |
+| MCP server + agente | Go + Gemini | — | Pablo |
 
 ### Comunicación
 
@@ -50,11 +50,11 @@ Proyecto 2 del curso de Arquitectura de Sistemas. Plataforma donde estudiantes r
 - Material → Sesiones: gRPC (`VerificarParticipacion`, antes de aceptar una evaluación).
 - Material → Usuarios: gRPC (`ValidarTutorRamo`, antes de aceptar material).
 - Los archivos (PDF e imágenes) solo viajan entre el BFF y Material, por gRPC. Nunca por Kafka.
-- Agente → Usuarios, Sesiones y Material: gRPC directo con los mismos `.proto` (sus tools no pasan por el BFF).
+- Agente → BFF: GraphQL (`BFF_URL`), reenviando el token del usuario. Sus tools no llaman a los servicios por gRPC directo.
 
 ### Agente (MCP)
 
-El MCP server expone tools que llaman a los servicios (buscar tutores, ver disponibilidad, crear reserva, generar quiz desde material). El loop del agente con el LLM en la nube vive en el mismo servicio. Caso de uso principal: "Necesito ayuda con Cálculo II el jueves en la tarde" → busca tutores, propone horarios y crea la reserva.
+El MCP server expone tools que llaman al BFF por GraphQL con el token del usuario (buscar tutores, ver disponibilidad, crear reserva). Las conversaciones se guardan en memoria, por usuario y conversación. El loop del agente con el LLM en la nube vive en el mismo servicio. Caso de uso principal: "Necesito ayuda con Cálculo II el jueves en la tarde" → busca tutores, propone horarios y crea la reserva.
 
 ## Decisiones del flujo (acordadas el 2026-11-12)
 
@@ -139,8 +139,13 @@ Cuando un compañero empiece el frontend, recordarle esto:
 - `chatAgente(mensaje, conversacionId)` devuelve `{ conversacionId respuesta acciones { tipo id } }`. Para seguir la conversación se manda el `conversacionId` de la respuesta anterior. Si `acciones` trae `sesion.creada`, el agente reservó y hay que refrescar esa vista. **Puede tardar hasta unos 2 minutos**: mostrar que está pensando y no reintentar mientras tanto.
 - Archivos (REST, no GraphQL), con la misma cabecera `Authorization`:
   - `POST /archivos`: multipart con los campos `archivo`, `ramoCodigo` y `titulo`. Responde 201 con el `Material` creado (JSON). Errores: 400 (falta un campo, o el archivo no es PDF, PNG ni JPEG de verdad), 401 (sin token o inválido), 403 (no tiene ese ramo activo), 413 (más de 10 MB), 503 (Material caído).
-  - `GET /archivos/:id`: los bytes, listos para abrir en el navegador o en un `<img>`. Errores: 400 (es un aviso), 401, 404 (no existe o no puede verlo), 503.
+  - `GET /archivos/:id`: los bytes. Exige la cabecera `Authorization`, así que un `<img src>` o un `<a href>` directo da 401 (no mandan cabeceras): el front lo baja con `fetch` y la cabecera, y lo muestra con `URL.createObjectURL(blob)` (o lo descarga con un `<a download>` sobre ese object URL). Errores: 400 (es un aviso), 401, 404 (no existe o no puede verlo), 503.
   - Los errores REST vienen con el formato de Nest: `{ statusCode, message, error }`. El mensaje del 413 sale en inglés ("File too large").
+- Zona horaria: no sumar horas fijas a UTC, porque las fechas del cambio de horario de Chile varían. Convertir con la zona `America/Santiago` usando una librería, como `date-fns-tz` (`fromZonedTime`, `formatInTimeZone`) o `Temporal`.
+- **CORS (decidido el 2026-11-24): el BFF no lo habilita, a propósito.**
+  - En desarrollo, el front usa el proxy de Vite (`/graphql` y `/archivos` hacia `http://localhost:3000`), así que el navegador ve el mismo origen.
+  - En Kubernetes, el ingress publica el front y el BFF bajo el mismo dominio (por ejemplo, `/` para el front y `/graphql` y `/archivos` para el BFF).
+  - Si algún día el front se publica en otro dominio, habría que agregar `enableCors` con una lista de orígenes leída de una variable de entorno.
 
 ## Contratos
 
@@ -151,7 +156,7 @@ Viven en el repo `Contratos-TutorMatch` (GitHub `dazztyn/Contratos-TutorMatch`),
 | `proto/sesiones/v1/sesiones.proto` | Acordado en `main` (`2fa0949`), implementado | Contrato de casillas por bloques; ya lo usa `SesionesGrpc`. |
 | `proto/usuarios/v1/usuarios.proto` | Acordado en `main` (`2fa0949`) | Registro, login (JWT), datos de usuario, ramos y búsqueda de tutores (`RegistroUsuario`, `Login`, ..., `ValidarTutorRamo`). |
 | `proto/material/v1/material.proto` | Acordado en `main` (`2fa0949`) | Material, archivos, avisos y evaluaciones, por gRPC (`SubirMaterial`, ..., `ObtenerResumenTutores`). |
-| `rest/agente.md` | BORRADOR, reemplazado por la propuesta de Pablo (pendiente de pasar al repo por PR) | `POST /agent/chat`; ver "Decisiones de los contratos". |
+| `rest/agente.md` | Acordado en `main` (`fb9118c`), implementado | `POST /agent/chat`; ver "Decisiones de los contratos". |
 | `eventos/sesion.*.json` | Estable | Formato Kafka que publica Sesiones; el BFF no lo usa. |
 
 Decisiones de los contratos que afectan al BFF:
@@ -160,17 +165,12 @@ Decisiones de los contratos que afectan al BFF:
 - **Ids:** usuarios y sesiones usan UUID en texto. Los códigos de ramo salen del catálogo `Usuarios.ListarRamos` (ej. `MAT1610`).
 - **Nombres en las sesiones:** para mostrar tutor y estudiante de muchas sesiones, usar `Usuarios.ObtenerUsuarios` en lote (una llamada por consulta GraphQL, no una por sesión). Los ids inexistentes se omiten sin error.
 - **Material visible:** `ListarMaterial` exige `usuario_id` y devuelve solo lo que ese usuario puede ver; el BFF no filtra por su cuenta.
-- **Agente:** manda la propuesta de Pablo (implementada en `pablofgx-code/tutormatch-agente`, rama `rama-para-probar`, `5f91694`), no el borrador de `rest/agente.md`. `POST {AGENTE_URL}/agent/chat` con `Content-Type: application/json` y el mismo `Authorization: Bearer <token>` del usuario; cuerpo `{ usuarioId, conversacionId?, mensaje }`; respuesta 200 `{ conversacionId, respuesta, acciones: [{ tipo, id }] }`. Errores con cuerpo `{ "error": "mensaje" }`: 400 (datos inválidos), 429 (límite por usuario), 503 (Gemini no responde) y 504 (superó el máximo de pasos). Gemini tiene 90 s de espera por llamada.
+- **Agente:** `rest/agente.md` (`fb9118c`, de Pablo), implementado en `pablofgx-code/tutormatch-agente` (`main` en `95abeb5`). Su sección "Restricciones de operación en Kubernetes" pide 1 réplica (las conversaciones viven en memoria) y el Service `agente:8081` solo interno (`/mcp` confía en `X-Usuario-Id`). `POST {AGENTE_URL}/agent/chat` con `Content-Type: application/json` y el mismo `Authorization: Bearer <token>` del usuario; cuerpo `{ usuarioId, conversacionId?, mensaje }`; respuesta 200 `{ conversacionId, respuesta, acciones: [{ tipo, id }] }`. Errores con cuerpo `{ "error": "mensaje" }`: 400 (datos inválidos), 429 (límite por usuario), 503 (Gemini no responde) y 504 (superó el máximo de pasos). Gemini tiene 90 s de espera por llamada.
 - **Direcciones:** `SESIONES_GRPC_URL`, `USUARIOS_GRPC_URL` y `MATERIAL_GRPC_URL` (en Kubernetes `<servicio>:9090`) y `AGENTE_URL` (`http://localhost:8081` en local, `http://agente:8081` en Kubernetes).
 - **Build:** el submódulo debe estar presente al compilar y ejecutar. En GitHub Actions el checkout necesita `submodules: true`, y el `Dockerfile` debe copiar `contracts/proto/`.
 
 Pendientes del lado de los contratos:
 
-- Pasar la propuesta de Pablo al repo de contratos por PR, reemplazando `rest/agente.md`.
-- Observaciones para Pablo (agente):
-  - En Kubernetes debe correr con 1 réplica: las conversaciones viven en memoria.
-  - `/mcp` solo dentro del clúster, porque confía en la cabecera `X-Usuario-Id`.
-  - Su trabajo está en `rama-para-probar`, no en `main`.
 - Coordinar con Pablo (Usuarios), para Kubernetes:
   - El mismo Secret `JWT_SECRET` para Usuarios y el BFF; el valor por defecto de su servicio es solo de desarrollo.
   - El puerto: su servidor escucha en el 50051 y lo acordado es `usuarios:9090`; se resuelve con `PORT=9090` en su manifiesto.
@@ -255,7 +255,7 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 ## Próximos pasos
 
-1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). ✅ Bloques horarios acordados en `propuestas/sesiones.md` (2026-11-16). ✅ Contratos de Sesiones, Usuarios y Material acordados en `proto/` (`2fa0949`), con tutorías solo de lunes a viernes (2026-11-17). ✅ Contrato del agente propuesto por Pablo (2026-11-24). Pendiente: pasarlo al repo de contratos por PR.
+1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). ✅ Bloques horarios acordados en `propuestas/sesiones.md` (2026-11-16). ✅ Contratos de Sesiones, Usuarios y Material acordados en `proto/` (`2fa0949`), con tutorías solo de lunes a viernes (2026-11-17). ✅ Contrato del agente acordado en `rest/agente.md` (`fb9118c`, 2026-11-24).
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12). ✅ Casillas por bloques según el contrato acordado (PR 5): migración V3, `MarcarCasilla`, `DesmarcarCasilla`, `ObtenerDisponibilidad` por rango, `BuscarDisponibilidad`, filtros de `ListarSesiones`, validaciones al crear y desmarcar, tarea programada de fin y vencimiento, `VerificarParticipacion` con `tutor_id` y `ramo_codigo`, y solo el tutor confirma y finaliza. Probado de punta a punta desde el BFF (2026-11-16). ✅ Adaptador gRPC real de `Usuarios.ValidarTutorRamo`, probado contra el servidor de Pablo (2026-11-21). ✅ Tests con JaCoCo ≥ 60%, Dockerfile y CI (PR mergeados). Pendiente: Kubernetes.
 3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es probar el agente real cuando haya clave de Gemini):
    1. ✅ `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
@@ -267,7 +267,7 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
       - ✅ GraphQL de evaluaciones: `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y `promedioEvaluaciones` y `cantidadEvaluaciones` en `Usuario`, resueltos en lote con `ObtenerResumenTutores`. Probado contra el mock (2026-11-21). Ojo: `tutoresPorRamo` no exige token, así que el promedio se puede ver sin sesión iniciada.
       - ✅ REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG, validando los primeros bytes) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`. Probado contra el mock (2026-11-21).
       - ✅ Probado todo el módulo contra el servicio real de Ien (2026-11-24, ver "Prueba de integración con Material").
-   6. ✅ Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), según la propuesta de Pablo. Probado contra el mock y contra un agente falso con los códigos 200, 429, 504 y fuera de plazo (2026-11-24). Pendiente: probarlo contra el agente real cuando haya una `GEMINI_API_KEY`.
+   6. ✅ Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), según `rest/agente.md`. Probado contra el mock y contra un agente falso con los códigos 200, 429, 504 y fuera de plazo (2026-11-24). Pendiente: probarlo contra el agente real cuando haya una `GEMINI_API_KEY`.
 4. Tests hasta coverage ≥ 60%: ✅ Sesiones (JaCoCo). ✅ BFF (2026-11-23): 71 tests unitarios con umbral de 60% en líneas, sentencias, ramas y funciones en `jest.config.ts` (solo se excluye `src/main.ts`); quedó en 87% de líneas, 88% de sentencias, 83% de ramas y 70% de funciones. Los adaptadores gRPC se prueban contra un servidor gRPC falso con los `.proto` reales (`test/servidor-grpc-falso.ts`).
 5. Dockerfile y pipeline: ✅ Sesiones. ✅ BFF (2026-11-23): `Dockerfile` multietapa (`node:24-alpine`, solo dependencias de producción, `dist/` y `contracts/proto/`, usuario `node`, `NODE_ENV=production`; en producción el esquema GraphQL se arma en memoria y no se escribe `schema.gql`) y `.github/workflows/ci.yml` (checkout con submódulo, lint, `test:cov` con umbral, `test:e2e` y `docker build`, sin publicar la imagen). Falta ver el primer run en GitHub.
 6. Kubernetes: manifiestos y despliegue de cada servicio (pendiente en todos).
