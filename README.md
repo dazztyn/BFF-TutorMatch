@@ -242,6 +242,17 @@ mutation {
 }
 ```
 
+Para el buscador del alumno, `buscarDisponibilidad` trae las casillas libres de un ramo con su tutor, nombre y calificación incluidos. Los tutores de todas las casillas se piden a Usuarios en una sola llamada.
+
+```graphql
+{
+  buscarDisponibilidad(ramoCodigo: "MAT1610", desde: "2026-11-23T00:00:00Z", hasta: "2026-11-28T00:00:00Z") {
+    id inicio
+    tutor { id nombre promedioEvaluaciones cantidadEvaluaciones }
+  }
+}
+```
+
 Para avisar de reservas nuevas, el front repite `sesiones(tutorId: ..., estado: PENDIENTE)` cada 30 a 60 segundos (`pollInterval` de Apollo Client).
 
 **7. La tutora inicia sesión y confirma.** El token de `login` va a Headers.

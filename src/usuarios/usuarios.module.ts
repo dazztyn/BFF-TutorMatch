@@ -2,12 +2,17 @@ import { Module } from '@nestjs/common';
 import { UsuariosGrpc } from './usuarios.grpc';
 import { UsuariosMock } from './usuarios.mock';
 import { USUARIOS_PORT } from './usuarios.port';
-import { SesionUsuariosResolver, UsuariosResolver } from './usuarios.resolver';
+import {
+  BloqueUsuariosResolver,
+  SesionUsuariosResolver,
+  UsuariosResolver,
+} from './usuarios.resolver';
 
 @Module({
   providers: [
     UsuariosResolver,
     SesionUsuariosResolver,
+    BloqueUsuariosResolver,
     // Único punto donde se elige el adaptador: gRPC si hay URL, si no el mock en memoria.
     {
       provide: USUARIOS_PORT,

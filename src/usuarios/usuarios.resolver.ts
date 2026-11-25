@@ -8,7 +8,7 @@ import {
   ResolveField,
   Resolver,
 } from '@nestjs/graphql';
-import { Sesion } from '../sesiones/sesiones.models';
+import { BloqueDisponibilidad, Sesion } from '../sesiones/sesiones.models';
 import { UsuarioId } from '../usuario-id.decorator';
 import { type Cargador, crearCargador } from '../cargador';
 import {
@@ -113,10 +113,24 @@ export class SesionUsuariosResolver {
   }
 
   private cargador(ctx: ContextoGraphql): Cargador<Usuario> {
-    return (ctx.cargadorUsuarios ??= crearCargador(
-      (ids) => this.usuarios.obtenerUsuarios(ids),
-      (u) => u.id,
-    ));
+    return cargadorUsuarios(ctx, this.usuarios);
+  }
+}
+
+// Agrega a cada casilla el tutor, con el mismo cargador que Sesion: una sola llamada por consulta.
+@Resolver(() => BloqueDisponibilidad)
+export class BloqueUsuariosResolver {
+  constructor(@Inject(USUARIOS_PORT) private readonly usuarios: UsuariosPort) {}
+
+  @ResolveField(() => Usuario, {
+    nullable: true,
+    description: 'null si el usuario ya no existe',
+  })
+  tutor(
+    @Parent() bloque: BloqueDisponibilidad,
+    @Context() ctx: ContextoGraphql,
+  ): Promise<Usuario | null> {
+    return cargadorUsuarios(ctx, this.usuarios)(bloque.tutorId);
   }
 }
 
@@ -124,3 +138,12 @@ export class SesionUsuariosResolver {
 interface ContextoGraphql {
   cargadorUsuarios?: Cargador<Usuario>;
 }
+
+const cargadorUsuarios = (
+  ctx: ContextoGraphql,
+  usuarios: UsuariosPort,
+): Cargador<Usuario> =>
+  (ctx.cargadorUsuarios ??= crearCargador(
+    (ids) => usuarios.obtenerUsuarios(ids),
+    (u) => u.id,
+  ));

@@ -41,6 +41,9 @@ type BloqueDisponibilidad {
   """false si tiene encima una sesión PENDIENTE o CONFIRMADA"""
   libre: Boolean!
   ramoCodigo: String!
+
+  """null si el usuario ya no existe"""
+  tutor: Usuario
   tutorId: ID!
 }
 
