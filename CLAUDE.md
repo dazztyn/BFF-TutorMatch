@@ -224,6 +224,30 @@ Observaciones para Ien:
 - kafkajs muestra un `TimeoutNegativeWarning` al arrancar, sin efecto.
 - Material rechaza ids que no son UUID (`INVALID_ARGUMENT`). Las sesiones viejas de pruebas manuales, con ids como `tut-e2e-278`, podrían provocar ese error en las consultas de promedios.
 
+### Prueba de integración con el agente (2026-11-26)
+
+A mano, con GraphiQL:
+
+- **Agente** de Pablo (`pablofgx-code/tutormatch-agente`, `main` en `95abeb5`), clonado en `Desktop\tutormatch-agente` y levantado con su `docker compose up -d --build`:
+  - la `GEMINI_API_KEY` en el `.env` de esa carpeta (lo excluyen su `.gitignore` y su `.dockerignore`);
+  - `BFF_URL=http://host.docker.internal:3000/graphql`, para que el contenedor llegue al BFF del equipo;
+  - el modelo por defecto, `gemini-flash-lite-latest`.
+- **BFF** con `SESIONES_GRPC_URL=localhost:9090`, `USUARIOS_GRPC_URL=localhost:50051`, `JWT_SECRET=dev-secret-cambiar-en-produccion` y `AGENTE_URL=http://localhost:8081`. Sin `MATERIAL_GRPC_URL`: Material quedó con el mock, así que el promedio de los tutores sale en 0.
+- **Usuarios** de Pablo en Docker (50051) y **Sesiones** real (9090), igual que en las pruebas del 2026-11-21 y del 2026-11-24.
+- Antes de la prueba se validaron contra `schema.gql` las 5 operaciones GraphQL del agente (`ramos`, `tutoresPorRamo`, `buscarDisponibilidad`, `disponibilidad`, `crearSesion`), sin errores.
+
+Funcionó todo:
+
+- Con cuentas nuevas, la tutora se inscribió en `MAT1610` y marcó los bloques D y E del jueves 2026-12-03 (`17:30Z` y `19:15Z`).
+- El alumno escribió "Necesito ayuda con Cálculo I el jueves en la tarde". El agente notó que el jueves 26 ya no tenía bloques en la tarde y propuso los del 3 de diciembre, en hora de Chile (14:30 y 16:15) y con el nombre de la tutora, con `acciones` vacío.
+- Al confirmar el horario con el mismo `conversacionId`, el agente reservó y respondió `acciones` con `sesion.creada`:
+  - la sesión quedó `PENDIENTE` en Sesiones, con "Tutora Agente" y "Alumno Agente";
+  - el alumno salió del token que el agente reenvió, no del modelo.
+- La tutora confirmó la sesión con `confirmarSesion`.
+- Cadena probada: alumno → BFF (GraphQL) → agente (REST) → Gemini → tools → BFF (GraphQL, con el mismo token) → Sesiones (gRPC) → Usuarios (`ValidarTutorRamo`).
+
+Observación: `sesiones(estado: PENDIENTE)` sin `tutorId` ni `estudianteId`, y sin token, devolvió también las sesiones de otros usuarios (de una prueba anterior). Ver "Próximos pasos".
+
 Si Docker Desktop se reinicia, los contenedores de prueba quedan apagados. Para levantarlos en orden (PowerShell):
 
 ```powershell
@@ -257,7 +281,7 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
 
 1. Contratos: ✅ repo `Contratos-TutorMatch` creado y usado como submódulo en el BFF y Sesiones; `sesiones.proto` y los eventos Kafka estables. ✅ Decisiones de Usuarios y Material acordadas y redactadas en `propuestas/` (2026-11-15). ✅ Bloques horarios acordados en `propuestas/sesiones.md` (2026-11-16). ✅ Contratos de Sesiones, Usuarios y Material acordados en `proto/` (`2fa0949`), con tutorías solo de lunes a viernes (2026-11-17). ✅ Contrato del agente acordado en `rest/agente.md` (`fb9118c`, 2026-11-24).
 2. Servicio de Sesiones funcional: ✅ Flyway, JPA, servidor gRPC y productor Kafka, probado a mano de punta a punta desde el BFF (2026-11-12). ✅ Casillas por bloques según el contrato acordado (PR 5): migración V3, `MarcarCasilla`, `DesmarcarCasilla`, `ObtenerDisponibilidad` por rango, `BuscarDisponibilidad`, filtros de `ListarSesiones`, validaciones al crear y desmarcar, tarea programada de fin y vencimiento, `VerificarParticipacion` con `tutor_id` y `ramo_codigo`, y solo el tutor confirma y finaliza. Probado de punta a punta desde el BFF (2026-11-16). ✅ Adaptador gRPC real de `Usuarios.ValidarTutorRamo`, probado contra el servidor de Pablo (2026-11-21). ✅ Tests con JaCoCo ≥ 60%, Dockerfile y CI (PR mergeados). Pendiente: Kubernetes.
-3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Pendiente, en este orden (lo siguiente es probar el agente real cuando haya clave de Gemini):
+3. BFF funcional: ✅ resolvers GraphQL y adaptador gRPC hacia Sesiones, probado de punta a punta contra Sesiones real con Postgres y Kafka (2026-11-12). Todos los módulos están hechos y probados contra los servicios reales. Pendiente antes de la demo: que cada usuario vea solo lo suyo (punto 7).
    1. ✅ `formatError` para que `extensions.code` sea `NOT_FOUND`, `CONFLICT`, etc.
    2. ✅ Módulo `usuarios/` (puerto + mock + gRPC), según el contrato acordado: `registro`, `login`, `yo` (usuario actual, con `esTutor`), `ramos`, `tutoresPorRamo`, `agregarRamosTutor` (formulario de inscripción), `quitarRamoTutor`, `reactivarRamoTutor`, y los campos `tutor` y `estudiante` de `Sesion` resueltos en lote con `ObtenerUsuarios`. Probado contra el mock (2026-11-17) y contra el servidor real de Pablo (2026-11-21, ver "Prueba de integración con Usuarios").
    3. ✅ Autenticación con el JWT de Usuarios (`JWT_SECRET`, rechazando tokens vencidos), reemplazando `x-usuario-id`. Sin roles: los permisos por ramo los valida cada servicio. Probado contra el mock (2026-11-17) y con tokens emitidos por el servidor real de Pablo (2026-11-21).
@@ -267,7 +291,8 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
       - ✅ GraphQL de evaluaciones: `evaluar`, `evaluacionesTutor`, `misEvaluaciones`, y `promedioEvaluaciones` y `cantidadEvaluaciones` en `Usuario`, resueltos en lote con `ObtenerResumenTutores`. Probado contra el mock (2026-11-21). Ojo: `tutoresPorRamo` no exige token, así que el promedio se puede ver sin sesión iniciada.
       - ✅ REST: `POST /archivos` (multipart, hasta 10 MB, PDF, PNG o JPEG, validando los primeros bytes) y `GET /archivos/:id`, con el JWT en la cabecera `Authorization`. Probado contra el mock (2026-11-21).
       - ✅ Probado todo el módulo contra el servicio real de Ien (2026-11-24, ver "Prueba de integración con Material").
-   6. ✅ Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), según `rest/agente.md`. Probado contra el mock y contra un agente falso con los códigos 200, 429, 504 y fuera de plazo (2026-11-24). Pendiente: probarlo contra el agente real cuando haya una `GEMINI_API_KEY`.
+   6. ✅ Módulo `agente/` (REST a `POST /agent/chat` con `AGENTE_URL`), según `rest/agente.md`. Probado contra el mock y contra un agente falso con los códigos 200, 429, 504 y fuera de plazo (2026-11-24), y contra el agente real de Pablo con Gemini, de la búsqueda a la reserva (2026-11-26, ver "Prueba de integración con el agente").
+   7. Pendiente antes de la demo: que cada usuario vea solo lo suyo. Hoy las queries de lectura no exigen token, y `sesiones` sin `tutorId` ni `estudianteId` devuelve las sesiones de todos (visto en la prueba del 2026-11-26).
 4. Tests hasta coverage ≥ 60%: ✅ Sesiones (JaCoCo). ✅ BFF (2026-11-23): 71 tests unitarios con umbral de 60% en líneas, sentencias, ramas y funciones en `jest.config.ts` (solo se excluye `src/main.ts`); quedó en 87% de líneas, 88% de sentencias, 83% de ramas y 70% de funciones. Los adaptadores gRPC se prueban contra un servidor gRPC falso con los `.proto` reales (`test/servidor-grpc-falso.ts`).
 5. Dockerfile y pipeline: ✅ Sesiones. ✅ BFF (2026-11-23): `Dockerfile` multietapa (`node:24-alpine`, solo dependencias de producción, `dist/` y `contracts/proto/`, usuario `node`, `NODE_ENV=production`; en producción el esquema GraphQL se arma en memoria y no se escribe `schema.gql`) y `.github/workflows/ci.yml` (checkout con submódulo, lint, `test:cov` con umbral, `test:e2e` y `docker build`, sin publicar la imagen). Falta ver el primer run en GitHub.
 6. Kubernetes: manifiestos y despliegue de cada servicio (pendiente en todos).
