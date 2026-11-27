@@ -1,0 +1,85 @@
+# BFF de TutorMatch. La imagen se construye en el equipo (docker build -t tutormatch-bff .)
+# y el Kubernetes de Docker Desktop la usa sin registro.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  labels:
+    app: bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bff
+  template:
+    metadata:
+      labels:
+        app: bff
+    spec:
+      containers:
+        - name: bff
+          image: tutormatch-bff:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: SESIONES_GRPC_URL
+              value: "sesiones:9090"
+            - name: USUARIOS_GRPC_URL
+              value: "usuarios:9090"
+            - name: MATERIAL_GRPC_URL
+              value: "material:9090"
+            - name: AGENTE_URL
+              value: "http://agente:8081"
+            # El mismo Secret que Usuarios: los tokens que firma Usuarios los verifica el BFF.
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: secret
+          # Sin endpoint de salud: basta con que el puerto acepte conexiones, como en Usuarios.
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            # Holgura para los archivos de hasta 10 MB, que pasan por memoria hacia Material.
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            runAsNonRoot: true
+            # Usuario "node" de la imagen oficial de Node.
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+---
+# El agente llama a http://bff:3000/graphql, y el nginx del front reenvía /graphql y /archivos aquí.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  labels:
+    app: bff
+spec:
+  type: ClusterIP
+  selector:
+    app: bff
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

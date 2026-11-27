@@ -158,6 +158,50 @@ curl -s http://localhost:3000/graphql -H "content-type: application/json" -d '{"
 
 En la imagen, el esquema GraphQL se arma en memoria: no se escribe `schema.gql`.
 
+### 6. En Kubernetes (Docker Desktop)
+
+El manifiesto está en [`k8s/bff.yaml`](k8s/bff.yaml): un Deployment y un Service `ClusterIP` llamado `bff`, en el puerto 3000. Sigue las mismas convenciones que el resto del equipo: YAML simple en el namespace por defecto, imagen construida en el equipo y sin registro.
+
+**Requisitos:** activar Kubernetes en Docker Desktop (Settings → Kubernetes). `kubectl config current-context` debe responder `docker-desktop`.
+
+1. Construye la imagen, con el submódulo `contracts/` descargado:
+
+   ```powershell
+   docker build -t tutormatch-bff:latest .
+   ```
+
+2. Crea el Secret `jwt-secret` (clave `secret`), **con el mismo valor que usa Usuarios**. Si Usuarios ya lo creó, sáltate este paso. No se versiona:
+
+   ```powershell
+   kubectl create secret generic jwt-secret --from-literal=secret=EL-MISMO-DE-USUARIOS
+   ```
+
+3. Aplica y revisa que el pod quede `Running`:
+
+   ```powershell
+   kubectl apply -f k8s/
+   ```
+
+   ```powershell
+   kubectl rollout status deployment/bff
+   ```
+
+   ```powershell
+   kubectl logs deployment/bff
+   ```
+
+4. Para probar el BFF solo, abre un túnel y consulta `http://localhost:3000/graphql` (si el 3000 está ocupado, usa por ejemplo `3300:3000`):
+
+   ```powershell
+   kubectl port-forward svc/bff 3000:3000
+   ```
+
+Si cambias el código, reconstruye la imagen y reinicia el pod con `kubectl rollout restart deployment/bff`.
+
+Dentro del clúster, el BFF busca a los demás servicios por el nombre de su Service: `sesiones:9090`, `usuarios:9090`, `material:9090` y `http://agente:8081`. Si alguno todavía no está desplegado, las operaciones que lo usan responden `SERVICE_UNAVAILABLE`, y el resto funciona.
+
+**Cómo llega el navegador (acordado):** el Service del BFF queda `ClusterIP`, sin controlador de ingress. El nginx del front sirve el build de React y reenvía `/graphql` y `/archivos` a `bff:3000`. Así el navegador ve un solo origen y no hace falta CORS. El agente también llama a `http://bff:3000/graphql`.
+
 ## Probar con GraphiQL
 
 Abre `http://localhost:3000/graphql` en el navegador.
@@ -439,7 +483,7 @@ export default defineConfig({
 });
 ```
 
-**El BFF no habilita CORS, a propósito.** En desarrollo se usa este proxy. En Kubernetes, el ingress publica el front y el BFF bajo el mismo dominio (`/` para el front, `/graphql` y `/archivos` para el BFF). Sin el proxy, el navegador bloquea las peticiones a `http://localhost:3000`.
+**El BFF no habilita CORS, a propósito.** En desarrollo se usa este proxy. En Kubernetes, el nginx del front sirve el build y reenvía `/graphql` y `/archivos` al Service `bff:3000`, así que también es un solo origen (ver [En Kubernetes](#6-en-kubernetes-docker-desktop)). Sin el proxy, el navegador bloquea las peticiones a `http://localhost:3000`.
 
 ## Errores
 
