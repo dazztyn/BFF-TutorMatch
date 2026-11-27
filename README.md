@@ -9,6 +9,18 @@ Front ──GraphQL──▶ BFF (NestJS) ──gRPC──▶ Sesiones  (Spring 
                                 ──REST──▶ Agente    (Go, con Gemini)
 ```
 
+## Repositorios del proyecto
+
+| Componente | Repositorio | Responsable | Tecnología |
+|---|---|---|---|
+| Frontend | [IenZAVALA-S/tutormatch-front](https://github.com/IenZAVALA-S/tutormatch-front) | Ien | React + Apollo Client |
+| BFF (este repo) | [dazztyn/BFF-TutorMatch](https://github.com/dazztyn/BFF-TutorMatch) | Vicente | NestJS + GraphQL |
+| Usuarios | [pablofgx-code/tutormatch-usuarios](https://github.com/pablofgx-code/tutormatch-usuarios) | Pablo | Go + PostgreSQL |
+| Sesiones | [dazztyn/Sesiones-TutorMatch](https://github.com/dazztyn/Sesiones-TutorMatch) | Vicente | Spring Boot + PostgreSQL |
+| Material y evaluaciones | [IenZAVALA-S/tutormatch-material](https://github.com/IenZAVALA-S/tutormatch-material) | Ien | NestJS + MongoDB |
+| Agente (MCP) | [pablofgx-code/tutormatch-agente](https://github.com/pablofgx-code/tutormatch-agente) | Pablo | Go + Gemini |
+| Contratos | [dazztyn/Contratos-TutorMatch](https://github.com/dazztyn/Contratos-TutorMatch) | Todo el equipo | `.proto`, eventos Kafka y contrato REST del agente |
+
 ## Cómo está hecho
 
 Cada servicio tiene su módulo en `src/` con el mismo patrón **puerto/adaptador**:
@@ -110,7 +122,15 @@ $env:USUARIOS_GRPC_URL="localhost:50051"; $env:SESIONES_GRPC_URL="localhost:9090
 
 Para que Sesiones también valide los ramos contra Usuarios real, levántalo con su propio `USUARIOS_GRPC_URL` apuntando al mismo servidor.
 
-### 4. Con Docker
+### 4. Con el agente real (servicio de Pablo)
+
+1. En el repo `pablofgx-code/tutormatch-agente`, crea un `.env` con la `GEMINI_API_KEY` (no se sube: lo excluyen su `.gitignore` y su `.dockerignore`) y `BFF_URL=http://host.docker.internal:3000/graphql`, para que el contenedor llegue al BFF de tu equipo.
+2. Levántalo con `docker compose up -d --build`. Escucha en el 8081.
+3. Arranca el BFF como en el paso anterior, agregando `AGENTE_URL=http://localhost:8081`.
+
+El agente llama al BFF con el token del usuario, así que necesita Usuarios y Sesiones reales (o el BFF con mocks) para buscar tutores y reservar.
+
+### 5. Con Docker
 
 La imagen se construye desde la raíz del repo, con el submódulo `contracts/` descargado (los `.proto` van dentro de la imagen):
 
