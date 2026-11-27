@@ -67,7 +67,7 @@ describe('GraphQL del BFF (e2e)', () => {
     );
     expect(confirmada.data.confirmarSesion.estado).toBe('CONFIRMADA');
 
-    const { body } = await gql(semana);
+    const { body } = await gql(semana, 'tut-1');
     // tut-1 no está registrado en el mock de Usuarios: el tutor viene null.
     expect(body.data.disponibilidad).toEqual([{ libre: false, tutor: null }]);
     expect(body.data.sesiones).toEqual([{ id }]);
@@ -80,11 +80,20 @@ describe('GraphQL del BFF (e2e)', () => {
     const { body: ocupada } = await gql(crear, 'est-2');
     expect(ocupada.errors[0].extensions.code).toBe('CONFLICT');
 
-    const { body: noExiste } = await gql(`{ sesion(id: "nope") { id } }`);
+    const { body: noExiste } = await gql(
+      `{ sesion(id: "nope") { id } }`,
+      'est-1',
+    );
     expect(noExiste.errors[0].extensions.code).toBe('NOT_FOUND');
 
     const { body: sinCabecera } = await gql(crear);
     expect(sinCabecera.errors[0].extensions.code).toBe('UNAUTHENTICATED');
+
+    const { body: sinToken } = await gql(semana);
+    expect(sinToken.errors[0].extensions.code).toBe('UNAUTHENTICATED');
+
+    const { body: ajenas } = await gql(semana, 'est-2');
+    expect(ajenas.errors[0].extensions.code).toBe('FORBIDDEN');
 
     const ajeno = jwt.sign({ sub: 'est-1' }, 'otro-secreto');
     const { body: firmaAjena } = await gql(crear, `Bearer ${ajeno}`);

@@ -1,5 +1,6 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SesionesMock } from './sesiones.mock';
-import { EstadoSesion } from './sesiones.models';
+import { EstadoSesion, type Sesion } from './sesiones.models';
 import { SesionesResolver } from './sesiones.resolver';
 
 // Lunes 2 de diciembre de 2030, bloque A (08:10 en Chile = 11:10 UTC).
@@ -31,9 +32,12 @@ describe('SesionesResolver', () => {
     expect((await resolver.confirmarSesion(sesion.id, 'tut-1')).estado).toBe(
       EstadoSesion.CONFIRMADA,
     );
-    expect(await resolver.sesion(sesion.id)).toMatchObject({ id: sesion.id });
+    expect(await resolver.sesion(sesion.id, 'tut-1')).toMatchObject({
+      id: sesion.id,
+    });
     expect(
       await resolver.listar(
+        'tut-1',
         'tut-1',
         undefined,
         EstadoSesion.CONFIRMADA,
@@ -63,5 +67,52 @@ describe('SesionesResolver', () => {
       EstadoSesion.CANCELADA,
     );
     expect(await resolver.desmarcarCasilla(casilla.id, 'tut-1')).toBe(true);
+  });
+
+  describe('solo muestra las sesiones del usuario', () => {
+    // tut-1 enseña a est-1 el lunes; el miércoles est-2 le enseña a tut-1.
+    const miercoles = new Date('2030-12-04T11:10:00Z');
+    let deTutor: Sesion;
+    let deAlumno: Sesion;
+
+    beforeEach(async () => {
+      await resolver.marcarCasilla('MAT1610', inicio, 'tut-1');
+      deTutor = await resolver.crearSesion(
+        { tutorId: 'tut-1', ramoCodigo: 'MAT1610', inicio },
+        'est-1',
+      );
+      await resolver.marcarCasilla('MAT1610', miercoles, 'est-2');
+      deAlumno = await resolver.crearSesion(
+        { tutorId: 'est-2', ramoCodigo: 'MAT1610', inicio: miercoles },
+        'tut-1',
+      );
+    });
+
+    it('sin filtros de usuario, une las suyas como tutor y como alumno, por inicio', async () => {
+      const lista = await resolver.listar('tut-1');
+      expect(lista.map((s) => s.id)).toEqual([deTutor.id, deAlumno.id]);
+      expect(await resolver.listar('nadie')).toEqual([]);
+    });
+
+    it('acepta filtros si uno de los ids es el suyo y rechaza los ajenos', async () => {
+      expect(await resolver.listar('est-1', undefined, 'est-1')).toEqual([
+        expect.objectContaining({ id: deTutor.id }),
+      ]);
+      await expect(resolver.listar('est-1', 'tut-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(resolver.listar('est-1', 'tut-1', 'est-2')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('una sesión ajena responde NOT_FOUND', async () => {
+      expect(await resolver.sesion(deTutor.id, 'est-1')).toMatchObject({
+        id: deTutor.id,
+      });
+      await expect(resolver.sesion(deTutor.id, 'est-2')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
   });
 });

@@ -202,9 +202,13 @@ type Query {
 
   """Catálogo de ramos"""
   ramos: [Ramo!]!
+
+  """Solo si el usuario es el tutor o el alumno"""
   sesion(id: ID!): Sesion
 
-  """Filtros opcionales; desde y hasta se aplican al inicio"""
+  """
+  Solo las del usuario: tutorId o estudianteId debe ser el suyo; sin ninguno, las suyas como tutor y como alumno. desde y hasta se aplican al inicio
+  """
   sesiones(desde: DateTime, estado: EstadoSesion, estudianteId: ID, hasta: DateTime, tutorId: ID): [Sesion!]!
 
   """Tutores con ese ramo activo"""

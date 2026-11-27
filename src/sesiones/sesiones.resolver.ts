@@ -1,4 +1,4 @@
-import { Inject } from '@nestjs/common';
+import { ForbiddenException, Inject, NotFoundException } from '@nestjs/common';
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UsuarioId } from '../usuario-id.decorator';
 import {
@@ -15,17 +15,30 @@ import type { SesionesPort } from './sesiones.port';
 export class SesionesResolver {
   constructor(@Inject(SESIONES_PORT) private readonly sesiones: SesionesPort) {}
 
-  @Query(() => Sesion, { nullable: true })
-  sesion(@Args('id', { type: () => ID }) id: string): Promise<Sesion> {
-    return this.sesiones.obtener(id);
+  @Query(() => Sesion, {
+    nullable: true,
+    description: 'Solo si el usuario es el tutor o el alumno',
+  })
+  async sesion(
+    @Args('id', { type: () => ID }) id: string,
+    @UsuarioId() usuarioId: string,
+  ): Promise<Sesion> {
+    const sesion = await this.sesiones.obtener(id);
+    // NOT_FOUND y no FORBIDDEN, para no revelar que la sesión existe.
+    if (sesion.tutorId !== usuarioId && sesion.estudianteId !== usuarioId) {
+      throw new NotFoundException(`No existe la sesión ${id}`);
+    }
+    return sesion;
   }
 
   // La semana del tutor se pide en una sola consulta GraphQL con disponibilidad y sesiones del mismo rango.
   @Query(() => [Sesion], {
     name: 'sesiones',
-    description: 'Filtros opcionales; desde y hasta se aplican al inicio',
+    description:
+      'Solo las del usuario: tutorId o estudianteId debe ser el suyo; sin ninguno, las suyas como tutor y como alumno. desde y hasta se aplican al inicio',
   })
-  listar(
+  async listar(
+    @UsuarioId() usuarioId: string,
     @Args('tutorId', { type: () => ID, nullable: true }) tutorId?: string,
     @Args('estudianteId', { type: () => ID, nullable: true })
     estudianteId?: string,
@@ -34,13 +47,21 @@ export class SesionesResolver {
     @Args('desde', { type: () => Date, nullable: true }) desde?: Date,
     @Args('hasta', { type: () => Date, nullable: true }) hasta?: Date,
   ): Promise<Sesion[]> {
-    return this.sesiones.listar({
-      tutorId,
-      estudianteId,
-      estado,
-      desde,
-      hasta,
-    });
+    const filtros = { estado, desde, hasta };
+    if (tutorId || estudianteId) {
+      if (tutorId !== usuarioId && estudianteId !== usuarioId) {
+        throw new ForbiddenException('Solo puedes ver tus propias sesiones');
+      }
+      return this.sesiones.listar({ ...filtros, tutorId, estudianteId });
+    }
+    // El contrato filtra con AND: "como tutor o como alumno" son dos llamadas. No se repiten, porque nadie se reserva a sí mismo.
+    const [comoTutor, comoAlumno] = await Promise.all([
+      this.sesiones.listar({ ...filtros, tutorId: usuarioId }),
+      this.sesiones.listar({ ...filtros, estudianteId: usuarioId }),
+    ]);
+    return [...comoTutor, ...comoAlumno].sort(
+      (a, b) => a.inicio.getTime() - b.inicio.getTime(),
+    );
   }
 
   @Query(() => [BloqueDisponibilidad], {

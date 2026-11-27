@@ -162,7 +162,7 @@ En la imagen, el esquema GraphQL se arma en memoria: no se escribe `schema.gql`.
 
 Abre `http://localhost:3000/graphql` en el navegador.
 
-- **Sin token:** `registro`, `login`, `ramos`, `tutoresPorRamo`, `disponibilidad`, `buscarDisponibilidad`, `sesiones` y `sesion`.
+- **Sin token:** `registro`, `login`, `ramos`, `tutoresPorRamo`, `disponibilidad` y `buscarDisponibilidad` (son para buscar).
 - **Con token:** todo lo demás. Copia el `token` que devuelven `registro` o `login` y pégalo en la pestaña **Headers**, abajo:
 
 ```json
@@ -248,7 +248,15 @@ mutation {
 }
 ```
 
-**6. La semana de la tutora**, con casillas y reservas en una sola consulta:
+**6. La tutora inicia sesión y ve su semana.** El token de `login` va a Headers: `sesiones` solo muestra las del usuario del token.
+
+```graphql
+mutation {
+  login(input: { email: "ana@uc.cl", password: "secreta123" }) { token }
+}
+```
+
+Casillas y reservas en una sola consulta:
 
 ```graphql
 {
@@ -275,13 +283,13 @@ Para el buscador del alumno, `buscarDisponibilidad` trae las casillas libres de 
 
 Para avisar de reservas nuevas, el front repite `sesiones(tutorId: ..., estado: PENDIENTE)` cada 30 a 60 segundos (`pollInterval` de Apollo Client).
 
-**7. La tutora inicia sesión y confirma.** El token de `login` va a Headers.
+**`sesiones` y `sesion` muestran solo lo del usuario del token:**
 
-```graphql
-mutation {
-  login(input: { email: "ana@uc.cl", password: "secreta123" }) { token }
-}
-```
+- Si se manda `tutorId` o `estudianteId`, al menos uno tiene que ser el id del usuario; si no, `FORBIDDEN`. El alumno pide las suyas con `estudianteId` igual a su propio id.
+- Sin ninguno de los dos, devuelve las del usuario como tutor y como alumno, ordenadas por `inicio`.
+- `sesion(id)` de una sesión en la que el usuario no participa responde `NOT_FOUND`.
+
+**7. La tutora confirma la reserva.**
 
 ```graphql
 mutation {
@@ -487,4 +495,4 @@ El CI (`.github/workflows/ci.yml`, GitHub Actions) corre en cada push y pull req
 - **Puerto 5432 ocupado:** si otro proyecto ya usa el 5432, publica el Postgres de cada servicio en otro puerto (Sesiones usa el 55432 y Usuarios, por ejemplo, el 55433).
 - **El token dura 24 horas.** Al vencer, todas las operaciones con token dan `UNAUTHENTICATED`; hay que volver a hacer `login`.
 - **`JWT_SECRET` distinto entre Usuarios y el BFF:** todas las operaciones con token dan `UNAUTHENTICATED`, aunque el login funcione.
-- **Algunas queries no piden token** (`sesiones`, `disponibilidad`, `tutoresPorRamo`, entre otras), así que cualquiera puede leer esos datos.
+- **Las queries para buscar no piden token** (`ramos`, `tutoresPorRamo`, `disponibilidad` y `buscarDisponibilidad`), así que cualquiera puede ver los tutores, sus casillas y su promedio. Las sesiones sí exigen token.
