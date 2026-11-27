@@ -148,7 +148,7 @@ Cuando un compañero empiece el frontend, recordarle esto:
 - Zona horaria: no sumar horas fijas a UTC, porque las fechas del cambio de horario de Chile varían. Convertir con la zona `America/Santiago` usando una librería, como `date-fns-tz` (`fromZonedTime`, `formatInTimeZone`) o `Temporal`.
 - **CORS (decidido el 2026-11-24): el BFF no lo habilita, a propósito.**
   - En desarrollo, el front usa el proxy de Vite (`/graphql` y `/archivos` hacia `http://localhost:3000`), así que el navegador ve el mismo origen.
-  - En Kubernetes, el ingress publica el front y el BFF bajo el mismo dominio (por ejemplo, `/` para el front y `/graphql` y `/archivos` para el BFF).
+  - En Kubernetes (acordado el 2026-11-27), sin controlador de ingress: el Service `bff` queda `ClusterIP` y el nginx del front de Ien sirve el build y reenvía `/graphql` y `/archivos` a `bff:3000`, así que el navegador también ve un solo origen.
   - Si algún día el front se publica en otro dominio, habría que agregar `enableCors` con una lista de orígenes leída de una variable de entorno.
 
 ## Contratos
@@ -299,4 +299,21 @@ Mientras estemos en la etapa 1, no escribas tests ni configures el pipeline salv
    7. ✅ Cada usuario ve solo lo suyo (2026-11-27): `sesiones` y `sesion` exigen token; un `tutorId` o `estudianteId` ajeno da `FORBIDDEN`, sin filtros devuelve las del usuario como tutor y como alumno, y una sesión ajena da `NOT_FOUND`. Antes, sin filtros devolvía las de todos (visto en la prueba del 2026-11-26). Probado con tests unitarios y e2e contra el mock.
 4. Tests hasta coverage ≥ 60%: ✅ Sesiones (JaCoCo). ✅ BFF (2026-11-23): 71 tests unitarios con umbral de 60% en líneas, sentencias, ramas y funciones en `jest.config.ts` (solo se excluye `src/main.ts`); quedó en 87% de líneas, 88% de sentencias, 83% de ramas y 70% de funciones. Los adaptadores gRPC se prueban contra un servidor gRPC falso con los `.proto` reales (`test/servidor-grpc-falso.ts`).
 5. Dockerfile y pipeline: ✅ Sesiones. ✅ BFF (2026-11-23): `Dockerfile` multietapa (`node:24-alpine`, solo dependencias de producción, `dist/` y `contracts/proto/`, usuario `node`, `NODE_ENV=production`; en producción el esquema GraphQL se arma en memoria y no se escribe `schema.gql`) y `.github/workflows/ci.yml` (checkout con submódulo, lint, `test:cov` con umbral, `test:e2e` y `docker build`, sin publicar la imagen). Falta ver el primer run en GitHub.
-6. Kubernetes: manifiestos y despliegue de cada servicio (pendiente en todos).
+6. Kubernetes, en el cluster de Docker Desktop (modo kind, nodo `desktop-control-plane`):
+   - Convenciones del equipo (las de Usuarios y del agente de Pablo):
+     - YAML simple en `k8s/` de cada repo, namespace por defecto, sin Helm ni Kustomize;
+     - imagen `tutormatch-<servicio>:latest` construida en el equipo, con `imagePullPolicy: IfNotPresent` y sin registro;
+     - Services `ClusterIP` con el nombre del servicio;
+     - Secret compartido `jwt-secret` (clave `secret`), creado a mano con `kubectl create secret`;
+     - sin root, con probes y límites.
+   - ✅ BFF (2026-11-27): `k8s/bff.yaml`, con Deployment y Service `bff:3000`, porque el agente llama a `http://bff:3000/graphql`.
+     - Variables: `NODE_ENV=production`, `SESIONES_GRPC_URL=sesiones:9090`, `USUARIOS_GRPC_URL=usuarios:9090`, `MATERIAL_GRPC_URL=material:9090`, `AGENTE_URL=http://agente:8081` y `JWT_SECRET` desde `jwt-secret`.
+     - Probes `tcpSocket` en el 3000; corre con el usuario `node` (uid 1000).
+   - Validado en el cluster: el pod quedó `Running` con la imagen local, sin errores de descarga. Con `kubectl port-forward svc/bff 3300:3000`:
+     - responde GraphQL;
+     - `sesiones` sin token da `UNAUTHENTICATED`;
+     - con token, lista desde Sesiones dentro del cluster (gRPC a `sesiones:9090`);
+     - `ramos` da `SERVICE_UNAVAILABLE`, porque Usuarios todavía no está en el cluster.
+   - `jwt-secret` se creó con el valor de desarrollo `dev-secret-cambiar-en-produccion`; Usuarios debe usar el mismo.
+   - ✅ Sesiones, su Postgres y Kafka desplegados por la sesión de Sesiones.
+   - Pendiente: Usuarios, Material, el agente y el front (con su nginx) en el cluster.
